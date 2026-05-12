@@ -1,0 +1,34 @@
+[Unit]
+Description=AI Calendar Adviser — sync Google Calendar events into local SQLite cache
+Documentation=https://github.com/hamlet-archer/ai-calendar-adviser
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/ai-calendar-adviser
+EnvironmentFile=/opt/ai-calendar-adviser/.env
+ExecStart=/usr/bin/node /opt/ai-calendar-adviser/dist/scripts/run-sync-once.js
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=300
+
+# Hardening (mirrors ai-comms-adviser shape).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ai-calendar-adviser
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
