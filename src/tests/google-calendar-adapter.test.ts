@@ -58,28 +58,57 @@ function mockClient(opts: {
 }
 
 describe('GoogleCalendarAdapter.fromCredentialsFile', () => {
-  it('throws when neither client nor credentials path is set', () => {
-    const env = process.env.GOOGLE_OAUTH_CREDS_PATH;
-    delete process.env.GOOGLE_OAUTH_CREDS_PATH;
-    expect(() => GoogleCalendarAdapter.fromCredentialsFile()).toThrow(/GOOGLE_OAUTH_CREDS_PATH/);
-    if (env !== undefined) process.env.GOOGLE_OAUTH_CREDS_PATH = env;
+  it('throws when neither client nor key path is set', () => {
+    const env = process.env.DWD_KEY_PATH;
+    delete process.env.DWD_KEY_PATH;
+    expect(() => GoogleCalendarAdapter.fromCredentialsFile()).toThrow(/DWD_KEY_PATH/);
+    if (env !== undefined) process.env.DWD_KEY_PATH = env;
   });
 
-  it('throws when the credentials file is missing required keys', () => {
-    const path = join(tmpDir, 'creds.json');
-    writeFileSync(path, JSON.stringify({ client_id: 'a' }));
-    expect(() => GoogleCalendarAdapter.fromCredentialsFile({ credentialsPath: path })).toThrow(
-      /missing required key/,
-    );
-  });
-
-  it('builds an adapter from a complete credentials file', () => {
-    const path = join(tmpDir, 'creds.json');
+  it('throws when subject is unset', () => {
+    const path = join(tmpDir, 'dwd.json');
     writeFileSync(
       path,
-      JSON.stringify({ client_id: 'a', client_secret: 'b', refresh_token: 'c' }),
+      JSON.stringify({
+        client_email: 'a@b.iam.gserviceaccount.com',
+        private_key: '-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n',
+        token_uri: 'https://oauth2.googleapis.com/token',
+      }),
     );
-    const adapter = GoogleCalendarAdapter.fromCredentialsFile({ credentialsPath: path });
+    const envSubj = process.env.DWD_IMPERSONATE_SUBJECT;
+    delete process.env.DWD_IMPERSONATE_SUBJECT;
+    expect(() => GoogleCalendarAdapter.fromCredentialsFile({ keyFilePath: path })).toThrow(
+      /DWD_IMPERSONATE_SUBJECT/,
+    );
+    if (envSubj !== undefined) process.env.DWD_IMPERSONATE_SUBJECT = envSubj;
+  });
+
+  it('throws when the key file is missing required fields', () => {
+    const path = join(tmpDir, 'dwd.json');
+    writeFileSync(path, JSON.stringify({ client_email: 'a@b.iam.gserviceaccount.com' }));
+    expect(() =>
+      GoogleCalendarAdapter.fromCredentialsFile({
+        keyFilePath: path,
+        subject: 'kelvin@liao.info',
+      }),
+    ).toThrow(/missing required field/);
+  });
+
+  it('builds an adapter from a complete DwD key file', () => {
+    const path = join(tmpDir, 'dwd.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        type: 'service_account',
+        client_email: 'a@b.iam.gserviceaccount.com',
+        private_key: '-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n',
+        token_uri: 'https://oauth2.googleapis.com/token',
+      }),
+    );
+    const adapter = GoogleCalendarAdapter.fromCredentialsFile({
+      keyFilePath: path,
+      subject: 'kelvin@liao.info',
+    });
     expect(adapter).toBeInstanceOf(GoogleCalendarAdapter);
   });
 });

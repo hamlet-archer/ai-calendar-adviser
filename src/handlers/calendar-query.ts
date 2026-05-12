@@ -16,7 +16,7 @@ import type { CalendarSlot } from '../calendar-config.js';
 import type { CalendarCache } from '../cache.js';
 import type { ContractEnvelope } from '../contracts.js';
 import type { Person } from '../person-calendar-map.js';
-import { domainsForPerson, resolveCalendarIds } from '../person-calendar-map.js';
+import { resolveCalendarIds, slotsForPerson } from '../person-calendar-map.js';
 
 export interface CalendarQueryDeps {
   readonly cache: CalendarCache;
@@ -67,23 +67,22 @@ export function handleCalendarQuery(
   const explicitCalendars = envelope.calendars as readonly string[] | undefined;
   const limit = (envelope.limit as number | undefined) ?? 100;
 
-  // Resolve calendar ids: explicit override > per-person default.
+  // Resolve calendar ids: explicit override > per-person default. The
+  // contract enum's domain strings translate to typed slots here; `staff`
+  // is a real calendar as of 2026-05-12 (no more composed-view skip).
   let queryIds: readonly string[];
   if (explicitCalendars && explicitCalendars.length > 0) {
-    // The explicit override carries domain slot ids (per the enum); resolve
-    // them through the same calendarIds map. `staff.schedules` collapses to
-    // empty until the composed view ships.
     const mapped: string[] = [];
     for (const slot of explicitCalendars) {
-      if (slot === 'staff.schedules') continue;
       if (slot === 'calendar.primary') mapped.push(deps.calendarIds.primary);
       else if (slot === 'calendar.mkkk') mapped.push(deps.calendarIds.mkkk);
       else if (slot === 'calendar.others') mapped.push(deps.calendarIds.others);
       else if (slot === 'calendar.mkkk-others') mapped.push(deps.calendarIds['mkkk-others']);
+      else if (slot === 'staff.schedules') mapped.push(deps.calendarIds.staff);
     }
     queryIds = mapped;
   } else {
-    queryIds = resolveCalendarIds(domainsForPerson(person), deps.calendarIds);
+    queryIds = resolveCalendarIds(slotsForPerson(person), deps.calendarIds);
   }
 
   const rows =

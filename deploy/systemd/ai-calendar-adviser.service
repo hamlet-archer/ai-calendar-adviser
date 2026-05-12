@@ -37,10 +37,12 @@ ExecStartPost=/bin/bash -c 'for i in $(seq 1 30); do [ -S /run/ai-calendar-advis
 RuntimeDirectory=ai-calendar-adviser
 RuntimeDirectoryMode=0755
 
-# OAuth credentials handed in via LoadCredential — the runtime path
-# resolves via $CREDENTIALS_DIRECTORY. The actual env-var wiring is
-# done in .env (CALENDAR_DB_PATH, CALENDAR_SOCKET_PATH, calendar slot ids).
-LoadCredential=google-oauth:/etc/ai-calendar-adviser/google-oauth.json
+# DwD service-account key handed in via LoadCredential. The runtime
+# path resolves via $CREDENTIALS_DIRECTORY/dwd-key. The actual env-var
+# wiring (CALENDAR_DB_PATH, CALENDAR_SOCKET_PATH, calendar slot ids,
+# DWD_IMPERSONATE_SUBJECT) is done in .env. DWD_KEY_PATH is set in .env
+# to $CREDENTIALS_DIRECTORY/dwd-key (resolved at start time).
+LoadCredential=dwd-key:/etc/ai-calendar-adviser/dwd-key.json
 
 # Hardening (mirrors ai-comms-adviser).
 NoNewPrivileges=true

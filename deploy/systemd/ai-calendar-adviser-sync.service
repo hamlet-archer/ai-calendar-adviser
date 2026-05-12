@@ -14,6 +14,9 @@ StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=300
 
+# DwD service-account key — same shape as the RPC daemon's LoadCredential.
+LoadCredential=dwd-key:/etc/ai-calendar-adviser/dwd-key.json
+
 # Hardening (mirrors ai-comms-adviser shape).
 NoNewPrivileges=yes
 ProtectSystem=strict

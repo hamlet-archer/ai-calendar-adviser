@@ -6,54 +6,45 @@
  * `calendar.query.v1` contract description:
  *   kelvin   → primary + others
  *   mkkk     → mkkk + mkkk-others
- *   sally    → staff.schedules (composed)
- *   chloe    → staff.schedules (composed)
+ *   sally    → staff
+ *   chloe    → staff
  *   ai-doer  → empty (24/7 working; no calendar)
  *
- * `staff.schedules` is a composed view over the 4 Google-backed calendars —
- * `staff` people resolve to it here, but the cache layer doesn't know about
- * the composed slot. v1 short-cut: staff resolves to `staff.schedules`, and
- * downstream cache reads fall back to the empty set until the projector that
- * fills `staff.schedules` ships. The contract response carries this via the
- * `staleness_seconds` / empty-events shape rather than failing.
+ * Note: the contract enum uses `staff.schedules` as the domain string; the
+ * agent maps that to slot `staff` (a real Google calendar
+ * `c_552a7b…@group.calendar.google.com`, confirmed 2026-05-12 — earlier
+ * scaffold treated it as a composed view, but Kelvin's calendar set
+ * includes a real shared Staff calendar).
  */
 
 import type { CalendarSlot } from './calendar-config.js';
 
 export type Person = 'kelvin' | 'sally' | 'chloe' | 'mkkk' | 'ai-doer';
 
-export type DomainSlot = CalendarSlot | 'staff.schedules';
-
-const PERSON_DOMAINS: Record<Person, readonly DomainSlot[]> = {
+const PERSON_SLOTS: Record<Person, readonly CalendarSlot[]> = {
   kelvin: ['primary', 'others'],
   mkkk: ['mkkk', 'mkkk-others'],
-  sally: ['staff.schedules'],
-  chloe: ['staff.schedules'],
+  sally: ['staff'],
+  chloe: ['staff'],
   'ai-doer': [],
 };
 
 /**
- * Returns the domain slots a `person` query should fan out across.
+ * Returns the calendar slots a `person` query should fan out across.
  * Pure routing — callers can override with an explicit `calendars` array
  * on the contract envelope.
  */
-export function domainsForPerson(person: Person): readonly DomainSlot[] {
-  return PERSON_DOMAINS[person];
+export function slotsForPerson(person: Person): readonly CalendarSlot[] {
+  return PERSON_SLOTS[person];
 }
 
 /**
- * Resolves a list of domain slots to the calendar ids the cache layer
- * understands. The 4 Google-backed slots map 1:1 via `calendarIds`;
- * `staff.schedules` resolves to the empty set at v1 — see file header.
+ * Resolves a list of calendar slots to the calendar ids the cache layer
+ * understands. ai-doer's empty slot list returns the empty array.
  */
 export function resolveCalendarIds(
-  domains: readonly DomainSlot[],
+  slots: readonly CalendarSlot[],
   calendarIds: Record<CalendarSlot, string>,
 ): readonly string[] {
-  const out: string[] = [];
-  for (const d of domains) {
-    if (d === 'staff.schedules') continue;
-    out.push(calendarIds[d]);
-  }
-  return out;
+  return slots.map((s) => calendarIds[s]);
 }
