@@ -1,43 +1,64 @@
 /**
- * ai-calendar-adviser entry point — SCAFFOLD ONLY.
+ * ai-calendar-adviser entry point.
+ *
+ * Today this binary runs the boot self-check (sub-item 2) and exits 0 on
+ * success / 1 on failure. The post-boot flow — the 15-min sync runner and
+ * the long-running Unix-socket RPC server — lands in sub-items 3 + 4.
  *
  * Implementation tracked in ai-ops-meta `architect-backlog.md` under the
  * Phase 3 grounding-source agents section. Design lives in
  * `docs/architecture.md` §6.8 in the same repo.
- *
- * When implemented, this file boots:
- *   1. Boot self-check (AP-3 + AP-4): Google OAuth token + 5 calendarIds + one
- *      `calendar.list` round-trip per calendar. Failure → process.exit(1).
- *   2. SQLite cache open at /var/lib/ai-calendar-adviser/calendar.db.
- *   3. 15-min systemd timer triggers `googleCalendar.sync()` to refresh cache.
- *   4. Unix-socket RPC server at /var/run/ai-calendar-adviser/query.sock,
- *      accepting `calendar.query.v1` + `calendar.find_free_slot.v1`.
- *
- * `calendar.write_event.v1` is explicitly deferred to v2.
  */
 
-async function main(): Promise<void> {
-  // eslint-disable-next-line no-console
-  console.error(
-    JSON.stringify({
-      level: 'error',
-      service: 'ai-calendar-adviser',
-      msg: 'scaffold_only',
-      hint: 'see ai-ops-meta architect-backlog.md Phase 3 grounding-source agents',
-    }),
-  );
-  process.exit(1);
+import { BootCheckError, renderDiagnostic, runBootCheck } from './boot-check.js';
+
+async function main(): Promise<number> {
+  try {
+    const { calendarIds } = await runBootCheck();
+    // eslint-disable-next-line no-console
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        service: 'ai-calendar-adviser',
+        phase: 'boot-check',
+        msg: 'boot_ok',
+        calendar_slot_count: Object.keys(calendarIds).length,
+        next: 'sub-item 3 wires runSyncCycle + 15-min systemd timer',
+      }),
+    );
+    return 0;
+  } catch (err) {
+    if (err instanceof BootCheckError) {
+      // eslint-disable-next-line no-console
+      console.error(renderDiagnostic(err.diagnostic));
+      return 1;
+    }
+    // eslint-disable-next-line no-console
+    console.error(
+      JSON.stringify({
+        level: 'fatal',
+        service: 'ai-calendar-adviser',
+        phase: 'boot-check',
+        msg: 'unhandled_error',
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return 2;
+  }
 }
 
-main().catch((err: unknown) => {
-  // eslint-disable-next-line no-console
-  console.error(
-    JSON.stringify({
-      level: 'fatal',
-      service: 'ai-calendar-adviser',
-      msg: 'unhandled_rejection',
-      error: err instanceof Error ? err.message : String(err),
-    }),
-  );
-  process.exit(2);
-});
+main().then(
+  (code) => process.exit(code),
+  (err: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error(
+      JSON.stringify({
+        level: 'fatal',
+        service: 'ai-calendar-adviser',
+        msg: 'unhandled_rejection',
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    process.exit(2);
+  },
+);
