@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-ops.hamlet-archer/contracts/calendar.query.v1.json",
+  "title": "calendar.query (v1) — RPC request",
+  "description": "Structured query contract for the calendar-adviser Unix-socket RPC interface. Filed 2026-05-10 with v0.45 §6.8 (Phase 3 task body enrichment) — first of three grounding-source contracts that feed Phase 3's `## Constraints` section.\n\nTransport: Unix socket at `/var/run/ai-calendar-adviser/query.sock`. Caller authenticated via SO_PEERCRED (kernel uid matched against per-agent uid table in registry). `caller_agent_id` in payload is self-asserted for legibility only; authorisation keys off the verified uid.\n\nReturns events from the calendar-adviser's local SQLite cache (synced from Google Calendar every 15min). Cache-stale (>30min) returns are flagged in the `staleness_seconds` field of the response so callers can degrade gracefully — Phase 3 emits `(calendar unavailable)` rather than fabricating per AP-1.\n\nRead-only. `calendar.write_event.v1` (blast radius `external-write`) is deferred to v2 of the agent.\n\nCalendar selection: a `person` argument resolves to a default calendar set per the registry-mapped routing (e.g. `kelvin` → `calendar.primary` + `calendar.others`; `mkkk` → `calendar.mkkk` + `calendar.mkkk-others`; staff resolves to `staff.schedules`). Callers can override with an explicit `calendars` array.\n\nai-doer is hard-coded as 24/7 working in the roster-adviser; for calendar-adviser, querying `person: 'ai-doer'` returns an empty events array (no calendar, not a failure).\n\nStatus: draft. Do not flip to active until calendar-adviser implementation ships and the boot self-check (Google OAuth + calendarList probe per §6.8 acceptance) passes once on `golden-ai-ops`.",
+  "type": "object",
+  "required": [
+    "contract_id",
+    "trace_id",
+    "dedupe_key",
+    "source_ref",
+    "caller_agent_id",
+    "person",
+    "window"
+  ],
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "const": "calendar.query.v1",
+      "description": "Contract identifier. Must be the literal string 'calendar.query.v1'."
+    },
+    "trace_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUIDv7 generated at the caller's entry point. Propagated to the receiver's audit row."
+    },
+    "dedupe_key": {
+      "type": "string",
+      "description": "SHA256 of '<caller_agent_id>:calendar.query.v1:<person>:<window_canonical_json>:<calendars|empty>:<limit>' — allows the receiver to detect and short-circuit duplicate in-flight queries."
+    },
+    "source_ref": {
+      "type": "string",
+      "description": "URL or ID of the caller context that triggered this query (e.g. an ops.db Runs row id, a Handoff id, or a Slack thread ts). Used in the audit row for traceability back to the originating job."
+    },
+    "caller_agent_id": {
+      "type": "string",
+      "description": "Self-asserted agent ID of the caller (e.g. 'chief-of-staff', 'ai-doer'). Logged for legibility. Authorisation decisions key off SO_PEERCRED uid, not this value."
+    },
+    "person": {
+      "type": "string",
+      "enum": ["kelvin", "sally", "chloe", "mkkk", "ai-doer"],
+      "description": "Whose calendar to query. Routes to the registry-declared default calendar set: kelvin → primary + others; mkkk → mkkk + mkkk-others; sally|chloe → staff.schedules. ai-doer → empty events (no calendar; lazy-resolves to roster-adviser at the consumer layer if presence is needed)."
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "tz"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 datetime lower bound (inclusive). Events overlapping this instant or starting after it are returned."
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 datetime upper bound (exclusive). Events ending at or before this instant are not included; events crossing the boundary are."
+        },
+        "tz": {
+          "type": "string",
+          "description": "IANA timezone (e.g. 'Europe/London', 'UTC'). The agent normalises returned event times to this zone before rendering."
+        }
+      },
+      "description": "Half-open time window for the query. Maximum span at v1: 31 days — wider windows are rejected with `bad_query` to bound cache reads."
+    },
+    "calendars": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "calendar.primary",
+          "calendar.mkkk",
+          "calendar.others",
+          "calendar.mkkk-others",
+          "staff.schedules"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Optional override of the per-person default calendar set. The five domain ids match registry/domains/. Callers SHOULD omit this and rely on the per-person routing unless they have a specific reason to narrow or widen the set (e.g. Phase 3's `## Constraints` only wants the primary calendar, not noisy 'others' events)."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "default": 100,
+      "description": "Maximum number of events to return. The receiver returns the most-relevant slice (start-time ascending) and reports `truncated: true` if the limit was hit."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-ops.hamlet-archer/contracts/calendar.find_free_slot.v1.json",
+  "title": "calendar.find_free_slot (v1) — RPC request",
+  "description": "Slot-finder RPC for the calendar-adviser. Filed 2026-05-10 with v0.45 §6.8 (Phase 3 task body enrichment) — sibling to `calendar.query.v1`; caller asks 'when is everyone free for D minutes?' rather than fetching events and computing client-side.\n\nTransport: Unix socket at `/var/run/ai-calendar-adviser/query.sock`. Caller authenticated via SO_PEERCRED. `caller_agent_id` is self-asserted for legibility only.\n\nPrimary v1 consumer: chief-of-staff scheduling and Phase 3's `## Constraints` precompute. The agent computes free intersections of every participant's busy events within the window, applies `working_hours` and `min_break_minutes` constraints, and returns the top `slots_n` slots ranked earliest-first (with optional secondary scoring once consumer signal accrues).\n\nai-doer is treated as always-free (no calendar). Unknown participants return `participant_unknown` — never substitute a default. Participants whose calendars are stale beyond the freshness threshold return `participant_stale` and the receiver refuses to compute slots involving them, per AP-1 (no fabricated availability).\n\nRead-only — does NOT book or hold the returned slot. Booking is `calendar.write_event.v1` (deferred to agent v2, blast radius `external-write`).\n\nStatus: draft. Do not flip to active until calendar-adviser implementation ships and the boot self-check passes once on `golden-ai-ops`.",
+  "type": "object",
+  "required": [
+    "contract_id",
+    "trace_id",
+    "dedupe_key",
+    "source_ref",
+    "caller_agent_id",
+    "participants",
+    "duration_min",
+    "window"
+  ],
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "const": "calendar.find_free_slot.v1",
+      "description": "Contract identifier. Must be the literal string 'calendar.find_free_slot.v1'."
+    },
+    "trace_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUIDv7 generated at the caller's entry point."
+    },
+    "dedupe_key": {
+      "type": "string",
+      "description": "SHA256 of '<caller_agent_id>:calendar.find_free_slot.v1:<participants_canonical_csv>:<duration_min>:<window_canonical_json>:<working_hours|empty>:<slots_n>'."
+    },
+    "source_ref": {
+      "type": "string",
+      "description": "URL or ID of the caller context that triggered this query."
+    },
+    "caller_agent_id": {
+      "type": "string",
+      "description": "Self-asserted agent ID of the caller. Authorisation decisions key off SO_PEERCRED uid."
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["kelvin", "sally", "chloe", "mkkk", "ai-doer"]
+      },
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "description": "Whose busy time to intersect. Order is not significant. ai-doer is always-free (no calendar). Unknown ids return `participant_unknown` rather than silently skipping — fail loud per AP-1."
+    },
+    "duration_min": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 480,
+      "description": "Minimum contiguous free duration in minutes. Common values: 15, 30, 60. Hard cap 480 (8h) — anything longer should be a multi-slot search by the caller."
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "tz"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 datetime, earliest slot start (inclusive)."
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 datetime, latest slot end (exclusive)."
+        },
+        "tz": {
+          "type": "string",
+          "description": "IANA timezone for working_hours interpretation and response rendering."
+        }
+      },
+      "description": "Half-open time window in which to search. Maximum span at v1: 14 days — wider windows are rejected with `bad_query` to bound the receiver's intersection cost."
+    },
+    "working_hours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+          "description": "Earliest hour of day a slot may start, in `HH:MM` 24h format, interpreted in `window.tz`."
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+          "description": "Latest hour of day a slot may end, in `HH:MM` 24h format. Slots whose `end > working_hours.end` are excluded."
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Optional ISO weekdays that count as working days, 0=Sunday..6=Saturday. Default: [1,2,3,4,5] (Mon-Fri). Public holidays are NOT excluded by calendar-adviser — that's roster-adviser's job once it ships; until then, callers tolerate slots that fall on UK public holidays."
+        }
+      },
+      "description": "Optional working-hours constraint. When omitted, the entire 24/7 window is searched. Default `days` is Mon-Fri but explicit `days: [0..6]` allows weekend slots."
+    },
+    "min_break_minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60,
+      "default": 0,
+      "description": "Optional minimum gap (in minutes) between a returned slot and the nearest busy event of any participant. Useful for back-to-back avoidance. Default 0 = adjacent-slot OK."
+    },
+    "slots_n": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 5,
+      "description": "Maximum number of ranked slots to return. The receiver returns slots earliest-first within the window; subsequent ranking heuristics may be added in v2 without a contract bump."
+    }
+  },
+  "additionalProperties": false
+}
