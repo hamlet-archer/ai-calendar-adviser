@@ -13,6 +13,7 @@ const CAL_IDS: Record<CalendarSlot, string> = {
   mkkk: 'cal-mkkk',
   others: 'cal-others',
   'mkkk-others': 'cal-mkkk-others',
+  staff: 'cal-staff',
 };
 
 const FROZEN_NOW = new Date('2026-05-12T09:00:00Z');
@@ -94,7 +95,8 @@ describe('runSyncCycle — happy path', () => {
       sleep: noopSleep,
     });
     expect(report.results.every((r) => r.status === 'ok')).toBe(true);
-    expect(report.results.reduce((a, r) => a + r.upserted, 0)).toBe(5);
+    // 5 calendars × 1 event each + 1 extra on primary = 6
+    expect(report.results.reduce((a, r) => a + r.upserted, 0)).toBe(6);
     const got = cache.eventsForRange({
       calendars: ['cal-primary'],
       start: '2026-05-12T00:00:00+01:00',
@@ -186,7 +188,7 @@ describe('runSyncCycle — AP-2 per-calendar isolation', () => {
     expect(others.status).toBe('error');
     expect(others.errorMessage).toBe('quota exceeded');
     const ok = report.results.filter((r) => r.status === 'ok');
-    expect(ok.map((r) => r.slot).sort()).toEqual(['mkkk', 'mkkk-others', 'primary']);
+    expect(ok.map((r) => r.slot).sort()).toEqual(['mkkk', 'mkkk-others', 'primary', 'staff']);
   });
 
   it('a failing calendar does not corrupt its prior sync_state', async () => {
@@ -223,8 +225,8 @@ describe('runSyncCycle — pacing', () => {
         sleepCalls.push(ms);
       },
     });
-    // 4 calendars → 3 spacings between them.
-    expect(sleepCalls).toHaveLength(3);
+    // 5 calendars → 4 spacings between them.
+    expect(sleepCalls).toHaveLength(4);
     const expectedMs = Math.ceil(1000 / CALENDAR_SYNC_RATE_PER_S);
     expect(sleepCalls.every((ms) => ms === expectedMs)).toBe(true);
   });
@@ -252,7 +254,7 @@ describe('runSyncCycle — round-trip across re-runs', () => {
       now: () => FROZEN_NOW,
       sleep: noopSleep,
     });
-    for (const slot of ['primary', 'mkkk', 'others', 'mkkk-others'] as const) {
+    for (const slot of ['primary', 'mkkk', 'others', 'mkkk-others', 'staff'] as const) {
       const call = captured.find((c) => c.calendarId === CAL_IDS[slot])!;
       expect(call.syncToken).toBe('tok-after');
     }
@@ -282,7 +284,8 @@ describe('runSyncCycle — report shape', () => {
       'mkkk',
       'others',
       'mkkk-others',
+      'staff',
     ]);
-    expect(calls).toHaveBeenCalledTimes(4);
+    expect(calls).toHaveBeenCalledTimes(5);
   });
 });

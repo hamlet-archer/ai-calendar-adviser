@@ -11,6 +11,7 @@ const CAL_IDS = {
   mkkk: 'mkkk-primary@google',
   others: 'kelvin-others@google',
   'mkkk-others': 'mkkk-others@google',
+  staff: 'staff@group.calendar.google.com',
 } as const;
 
 function seedEvent(cache: CalendarCache, id: string, calendarId: string, start: string, end: string) {

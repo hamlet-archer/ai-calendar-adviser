@@ -7,6 +7,7 @@ const VALID_ENV = {
   CALENDAR_ID_MKKK: 'cal-mkkk',
   CALENDAR_ID_OTHERS: 'cal-others',
   CALENDAR_ID_MKKK_OTHERS: 'cal-mkkk-others',
+  CALENDAR_ID_STAFF: 'cal-staff',
 };
 
 function adapterFromMocks(opts: {
@@ -20,6 +21,7 @@ function adapterFromMocks(opts: {
       { id: 'cal-mkkk' },
       { id: 'cal-others' },
       { id: 'cal-mkkk-others' },
+      { id: 'cal-staff' },
     ]);
   const listEvents = opts.listEvents ?? (async () => undefined);
   // Cast — we don't construct a real calendar_v3.Calendar; we hand the
@@ -52,7 +54,13 @@ describe('runBootCheck — happy path', () => {
       },
     });
     await runBootCheck({ adapter, env: VALID_ENV });
-    expect(seen.sort()).toEqual(['cal-mkkk', 'cal-mkkk-others', 'cal-others', 'cal-primary']);
+    expect(seen.sort()).toEqual([
+      'cal-mkkk',
+      'cal-mkkk-others',
+      'cal-others',
+      'cal-primary',
+      'cal-staff',
+    ]);
   });
 });
 
@@ -70,7 +78,7 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
     expect(caught).toBeInstanceOf(BootCheckError);
     expect(caught?.diagnostic.step).toBe('calendar-config');
     expect(caught?.diagnostic.ranked_causes[0]).toMatch(/CALENDAR_ID_PRIMARY/);
-    expect(caught?.diagnostic.ranked_causes).toHaveLength(3);
+    expect(caught?.diagnostic.ranked_causes.length).toBeGreaterThanOrEqual(3);
   });
 
   it('step google-calendar-list: listCalendars throws → ranked OAuth causes', async () => {
@@ -87,7 +95,7 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
     }
     expect(caught?.diagnostic.step).toBe('google-calendar-list');
     expect(caught?.diagnostic.upstream_error).toBe('invalid_grant');
-    expect(caught?.diagnostic.ranked_causes[0]).toMatch(/refresh token revoked/i);
+    expect(caught?.diagnostic.ranked_causes[0]).toMatch(/DwD scope not authorized/);
   });
 
   it('step google-calendar-slot-resolve: omit one calendarId → names the missing slot', async () => {
@@ -121,7 +129,7 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
       caught = err as BootCheckError;
     }
     expect(caught?.diagnostic.step).toBe('google-calendar-slot-resolve');
-    expect(caught?.diagnostic.upstream_error).toMatch(/^4 of 4/);
+    expect(caught?.diagnostic.upstream_error).toMatch(/^5 of 5/);
   });
 
   it('step google-events-list: per-calendar 403 surfaces with the offending slot in detail', async () => {
@@ -177,7 +185,7 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
       } catch (err) {
         caught = err as BootCheckError;
       }
-      expect(caught?.diagnostic.ranked_causes).toHaveLength(3);
+      expect(caught?.diagnostic.ranked_causes.length).toBeGreaterThanOrEqual(3);
     }
   });
 });

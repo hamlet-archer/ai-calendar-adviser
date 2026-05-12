@@ -57,8 +57,9 @@ export interface BootCheckDeps {
 }
 
 const RANKED_CAUSES_OAUTH: readonly string[] = [
-  'OAuth refresh token revoked (ai@liao.info credentials rotated or revoked in Workspace Admin Console)',
-  'Scope downgrade (the credential no longer carries https://www.googleapis.com/auth/calendar.readonly)',
+  'DwD scope not authorized (Admin Console > API controls > Domain-wide Delegation: client_id 101397011922329106102 missing scope https://www.googleapis.com/auth/calendar.readonly)',
+  'Impersonation subject lost calendar access ($DWD_IMPERSONATE_SUBJECT no longer has the calendarId on their calendarList — share calendar or pick a different subject)',
+  'DwD key rotated / deleted (private_key in /etc/ai-calendar-adviser/dwd-key.json no longer valid; rotate via service account console)',
   'Google API outage / transient 5xx (check https://status.cloud.google.com/ and retry)',
 ];
 
@@ -111,14 +112,15 @@ export async function runBootCheck(deps: BootCheckDeps = {}): Promise<{
     throw err;
   }
 
-  // Step 1 — OAuth + calendarList enumeration in one call.
+  // Step 1 — DwD service-account load + calendarList enumeration.
   let adapter: GoogleCalendarAdapter;
   let allCalendars;
   try {
     adapter =
       deps.adapter ??
       DefaultAdapter.fromCredentialsFile({
-        credentialsPath: env.GOOGLE_OAUTH_CREDS_PATH,
+        keyFilePath: env.DWD_KEY_PATH,
+        subject: env.DWD_IMPERSONATE_SUBJECT,
       });
   } catch (err) {
     throw new BootCheckError({

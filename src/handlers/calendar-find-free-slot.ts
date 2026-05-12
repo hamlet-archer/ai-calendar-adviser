@@ -26,7 +26,7 @@ import type { CalendarSlot } from '../calendar-config.js';
 import type { CalendarCache, EventRow } from '../cache.js';
 import type { ContractEnvelope } from '../contracts.js';
 import type { Person } from '../person-calendar-map.js';
-import { domainsForPerson, resolveCalendarIds } from '../person-calendar-map.js';
+import { resolveCalendarIds, slotsForPerson } from '../person-calendar-map.js';
 import type { HandlerError } from './calendar-query.js';
 
 export interface CalendarFindFreeSlotDeps {
@@ -246,7 +246,7 @@ export function handleFindFreeSlot(
   // 1. Collect busy intervals from every participant's calendars.
   const calendarIdSet = new Set<string>();
   for (const p of participants) {
-    const ids = resolveCalendarIds(domainsForPerson(p), deps.calendarIds);
+    const ids = resolveCalendarIds(slotsForPerson(p), deps.calendarIds);
     for (const id of ids) calendarIdSet.add(id);
   }
   const calendarIds = [...calendarIdSet];

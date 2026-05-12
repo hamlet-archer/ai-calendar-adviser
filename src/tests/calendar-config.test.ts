@@ -11,11 +11,12 @@ const fullEnv: NodeJS.ProcessEnv = {
   CALENDAR_ID_MKKK: 'mkkk@group.calendar.google.com',
   CALENDAR_ID_OTHERS: 'others@group.calendar.google.com',
   CALENDAR_ID_MKKK_OTHERS: 'mkkk-others@group.calendar.google.com',
+  CALENDAR_ID_STAFF: 'staff@group.calendar.google.com',
 };
 
 describe('CALENDAR_SLOTS', () => {
-  it('lists the 4 Google-backed slots in canonical order', () => {
-    expect([...CALENDAR_SLOTS]).toEqual(['primary', 'mkkk', 'others', 'mkkk-others']);
+  it('lists the 5 Google-backed slots in canonical order', () => {
+    expect([...CALENDAR_SLOTS]).toEqual(['primary', 'mkkk', 'others', 'mkkk-others', 'staff']);
   });
 });
 
@@ -38,6 +39,7 @@ describe('loadCalendarIds', () => {
     expect(map.mkkk).toBe('mkkk@group.calendar.google.com');
     expect(map.others).toBe('others@group.calendar.google.com');
     expect(map['mkkk-others']).toBe('mkkk-others@group.calendar.google.com');
+    expect(map.staff).toBe('staff@group.calendar.google.com');
   });
 
   it('trims surrounding whitespace', () => {
@@ -53,9 +55,10 @@ describe('loadCalendarIds', () => {
       caught = err as CalendarConfigError;
     }
     expect(caught).toBeInstanceOf(CalendarConfigError);
-    expect(caught?.missingSlots.sort()).toEqual(['mkkk-others', 'primary']);
+    expect(caught?.missingSlots.sort()).toEqual(['mkkk-others', 'primary', 'staff']);
     expect(caught?.message).toMatch(/CALENDAR_ID_PRIMARY/);
     expect(caught?.message).toMatch(/CALENDAR_ID_MKKK_OTHERS/);
+    expect(caught?.message).toMatch(/CALENDAR_ID_STAFF/);
   });
 
   it('treats whitespace-only env var as missing', () => {
