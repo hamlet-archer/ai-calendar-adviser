@@ -4,7 +4,7 @@ Read-only RPC over Google Calendar. Owns the 5 calendar domains transferred from
 
 ## Status
 
-**Scaffold only.** No real ingestion yet. Implementation tracked in [ai-ops-meta `architect-backlog.md`](https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md) under Phase 3 grounding-source agents.
+**Scaffold + SQLite cache layer (sub-item 1).** No real Google ingestion yet — the cache layer is unit-tested in isolation; main entry still exits with `scaffold_only` until sub-item 2 (Google Calendar adapter + boot self-check) lands. Implementation tracked in [ai-ops-meta `architect-backlog.md`](https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md) under Phase 3 grounding-source agents.
 
 Design: [`docs/architecture.md` §6.8](https://github.com/hamlet-archer/ai-ops-meta/blob/main/docs/architecture.md) — Grounding-source rollout.
 
