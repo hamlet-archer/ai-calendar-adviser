@@ -25,7 +25,10 @@ import { renderSyncReport, runSyncCycle } from './sync-runner.js';
 import { startRpcServer, type RunningRpcServer } from './rpc-server.js';
 
 const DEFAULT_DB_PATH = '/var/lib/ai-calendar-adviser/calendar.db';
-const DEFAULT_SOCKET_PATH = '/var/run/ai-calendar-adviser/query.sock';
+// systemd RuntimeDirectory=ai-calendar-adviser creates /run/ai-calendar-adviser/.
+// Note: /var/run is a compat symlink to /run on every modern systemd
+// distribution, so callers using either path resolve to the same socket.
+const DEFAULT_SOCKET_PATH = '/run/ai-calendar-adviser/query.sock';
 
 async function main(): Promise<number> {
   const dbPath = process.env.CALENDAR_DB_PATH ?? DEFAULT_DB_PATH;
