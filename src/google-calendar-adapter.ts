@@ -54,6 +54,16 @@ export interface ListEventsOptions {
   /** Incremental-sync token from a prior response. */
   readonly syncToken?: string;
   readonly maxResults?: number;
+  /**
+   * When true, returns only the first page of results — no pagination loop.
+   * Use for cheap smoke probes (e.g. the boot-check `events.list({maxResults:1})`
+   * step) where fetching every event in a busy calendar would burn the
+   * per-user-per-minute API quota.
+   *
+   * Defaults to false; sync-runner callers must omit it to preserve full-history
+   * fetches.
+   */
+  readonly singlePage?: boolean;
 }
 
 export interface ListEventsResult {
@@ -155,6 +165,7 @@ export class GoogleCalendarAdapter {
       if (res.data.nextSyncToken) {
         nextSyncToken = res.data.nextSyncToken;
       }
+      if (options.singlePage) break;
     } while (pageToken);
     return { events, nextSyncToken };
   }
