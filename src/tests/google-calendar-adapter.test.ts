@@ -189,6 +189,41 @@ describe('GoogleCalendarAdapter.listEvents', () => {
     await adapter.listEvents({ calendarId: 'cal-A', maxResults: 1 });
     expect(captured[0]?.maxResults).toBe(1);
   });
+
+  it('singlePage=true stops after the first page even when nextPageToken is set', async () => {
+    const captured: calendar_v3.Params$Resource$Events$List[] = [];
+    const client = mockClient({
+      eventPages: [
+        { items: [{ id: 'e1' }], nextPageToken: 'p2' },
+        { items: [{ id: 'e2' }], nextPageToken: 'p3' },
+        { items: [{ id: 'e3' }], nextSyncToken: 'tok-3' },
+      ],
+      capturedEventParams: captured,
+    });
+    const adapter = new GoogleCalendarAdapter(client);
+    const got = await adapter.listEvents({
+      calendarId: 'cal-A',
+      maxResults: 1,
+      singlePage: true,
+    });
+    expect(captured.length).toBe(1);
+    expect(got.events.map((e) => e.id)).toEqual(['e1']);
+  });
+
+  it('singlePage=false (default) paginates as before', async () => {
+    const captured: calendar_v3.Params$Resource$Events$List[] = [];
+    const client = mockClient({
+      eventPages: [
+        { items: [{ id: 'e1' }], nextPageToken: 'p2' },
+        { items: [{ id: 'e2' }], nextSyncToken: 'tok-2' },
+      ],
+      capturedEventParams: captured,
+    });
+    const adapter = new GoogleCalendarAdapter(client);
+    const got = await adapter.listEvents({ calendarId: 'cal-A' });
+    expect(captured.length).toBe(2);
+    expect(got.events.map((e) => e.id)).toEqual(['e1', 'e2']);
+  });
 });
 
 describe('scope constant', () => {

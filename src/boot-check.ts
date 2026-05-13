@@ -174,10 +174,16 @@ export async function runBootCheck(deps: BootCheckDeps = {}): Promise<{
   // failure aborts boot — at boot time we want the loudest signal; the
   // sync runner (sub-item 3) can keep running on a partial set, this
   // can't.
+  //
+  // `singlePage: true` is load-bearing: the adapter's listEvents paginates
+  // by default until the API stops returning nextPageToken. Without this
+  // flag, smoke-testing a busy calendar (e.g. kelvin@liao.info) fetches
+  // every event one page at a time, burning the per-user-per-minute Google
+  // Calendar quota in under a minute on cold boot.
   for (const slot of CALENDAR_SLOTS) {
     const id = calendarIds[slot];
     try {
-      await adapter.listEvents({ calendarId: id, maxResults: 1 });
+      await adapter.listEvents({ calendarId: id, maxResults: 1, singlePage: true });
     } catch (err) {
       throw new BootCheckError({
         level: 'fatal',
