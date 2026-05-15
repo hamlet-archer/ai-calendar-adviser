@@ -1,17 +1,10 @@
 /**
- * Calendar per-user OAuth adapter — non-DwD.
+ * Calendar per-user OAuth adapter.
  *
- * Replaces `GoogleCalendarAdapter`'s DwD shape per the 2026-05-13 security
- * cut. The Workspace-wide Domain-Wide Delegation client `101397011922329106102`
- * was deleted 2026-05-14 because a leaked SA key would have impersonated any
- * user — including kelvin@ — and Google's design provides no scope of subject
- * restriction below the workspace; code-level guards are theatre against an
- * SA-key leak. See `feedback_no_dwd_anywhere` + `feedback_no_kelvin_account_impersonation`.
- *
- * This adapter holds a SINGLE OAuth refresh token bound to `ai@liao.info`
- * (the system's own identity, the only authorized subject for the calendar
- * surface) — never a human staff member's mailbox, and never Kelvin's.
- * Per `feedback_no_kelvin_account_impersonation` the module rejects
+ * Holds a SINGLE OAuth refresh token bound to `ai@liao.info` (the system's
+ * own identity, the only authorized subject for the calendar surface) —
+ * never a human staff member's mailbox, and never Kelvin's. Per
+ * `feedback_no_kelvin_account_impersonation` the module rejects
  * `subject=kelvin@liao.info` at load time.
  *
  * Token-file shape, written by `scripts/bootstrap-oauth.ts` (G6.5b) to
@@ -28,29 +21,49 @@
  *     ]
  *   }
  *
- * Public surface mirrors `GoogleCalendarAdapter.listCalendars()` /
- * `.listEvents()` exactly so the call sites in `sync-runner.ts` +
- * `boot-check.ts` swap with minimal diff. Internally the googleapis
- * Calendar client is wired with an `OAuth2Client` that auto-refreshes
- * via the refresh token; `getAccessToken()` is also exposed for tests
- * + auditing the refresh path with a mocked token endpoint.
+ * Internally the googleapis Calendar client is wired with an
+ * `OAuth2Client` that auto-refreshes via the refresh token;
+ * `getAccessToken()` is also exposed for tests + auditing the refresh
+ * path with a mocked token endpoint.
  *
- * Missing-token-file behavior: throws synchronously. There is NO
- * fall-through to DwD or any other auth path. The adapter is the only
- * auth path; absent the token, the calendar surface is offline.
+ * Missing-token-file behavior: throws synchronously. The adapter is the
+ * only auth path; absent the token, the calendar surface is offline.
+ *
+ * Historical context (2026-05-13 security cut, G6.5a/b/c): this adapter
+ * replaced a service-account-impersonation shape that authenticated as
+ * `kelvin@liao.info` workspace-wide. See `feedback_no_dwd_anywhere` +
+ * `feedback_no_kelvin_account_impersonation` for the rationale.
  */
 
 import { readFileSync } from 'node:fs';
 import { OAuth2Client } from 'google-auth-library';
 import { google, type calendar_v3 } from 'googleapis';
-import {
-  type ListEventsOptions,
-  type ListEventsResult,
-} from './google-calendar-adapter.js';
-
-export { type ListEventsOptions, type ListEventsResult };
 
 export const CALENDAR_READONLY_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+
+export interface ListEventsOptions {
+  readonly calendarId: string;
+  /** ISO timestamp. Mutually exclusive with `syncToken`. */
+  readonly timeMin?: string;
+  /** ISO timestamp. Mutually exclusive with `syncToken`. */
+  readonly timeMax?: string;
+  /** Incremental-sync token from a prior response. */
+  readonly syncToken?: string;
+  readonly maxResults?: number;
+  /**
+   * When true, returns only the first page of results — no pagination loop.
+   * Use for cheap smoke probes (e.g. the boot-check `events.list({maxResults:1})`
+   * step) where fetching every event in a busy calendar would burn the
+   * per-user-per-minute API quota.
+   */
+  readonly singlePage?: boolean;
+}
+
+export interface ListEventsResult {
+  readonly events: readonly calendar_v3.Schema$Event[];
+  /** Carries to the next call to resume an incremental sync. */
+  readonly nextSyncToken: string | null;
+}
 export const OAUTH_TOKEN_PATH_DEFAULT = '/etc/ai-calendar-adviser/oauth-token.json';
 export const OAUTH_SUBJECT_DEFAULT = 'ai@liao.info';
 

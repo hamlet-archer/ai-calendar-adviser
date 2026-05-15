@@ -19,7 +19,7 @@
 import type { CalendarSlot } from './calendar-config.js';
 import { CALENDAR_SLOTS } from './calendar-config.js';
 import type { CalendarCache, EventRow } from './cache.js';
-import type { GoogleCalendarAdapter } from './google-calendar-adapter.js';
+import type { GoogleCalendarUserOauthAdapter } from './google-calendar-user-oauth-adapter.js';
 import type { calendar_v3 } from 'googleapis';
 
 // PATCH-EXPIRY: 2026-08-12 owner=calendar-adviser reason=https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md (calendar-adviser sub-item 3 magic-number register)
@@ -28,7 +28,7 @@ export const CALENDAR_SYNC_RATE_PER_S = 5;
 export const CALENDAR_LOOKBACK_DAYS = 30;
 
 export interface SyncCycleDeps {
-  readonly adapter: GoogleCalendarAdapter;
+  readonly adapter: GoogleCalendarUserOauthAdapter;
   readonly cache: CalendarCache;
   readonly calendarIds: Record<CalendarSlot, string>;
   /** Clock seam for deterministic lookback windows in tests. */

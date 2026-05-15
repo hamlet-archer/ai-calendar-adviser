@@ -12,10 +12,10 @@ import { startRpcServer, type RunningRpcServer } from '../rpc-server.js';
 
 const CONTRACTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../contracts');
 
+// G6.5c: kelvin-only `primary` + `others` slots dropped; tests use the
+// remaining non-kelvin shared calendars.
 const CAL_IDS = {
-  primary: 'kelvin-primary@google',
   mkkk: 'mkkk-primary@google',
-  others: 'kelvin-others@google',
   'mkkk-others': 'mkkk-others@google',
   staff: 'staff@group.calendar.google.com',
 } as const;
@@ -80,8 +80,8 @@ describe('rpc-server integration', () => {
 
   it('round-trips a valid calendar.query.v1 envelope', async () => {
     cache.upsertEvent({
-      id: 'p1',
-      calendarId: CAL_IDS.primary,
+      id: 'm1',
+      calendarId: CAL_IDS.mkkk,
       summary: 'standup',
       startIso: '2026-05-12T10:00:00Z',
       endIso: '2026-05-12T10:30:00Z',
@@ -97,7 +97,7 @@ describe('rpc-server integration', () => {
       dedupe_key: 'sha256:x',
       source_ref: 'test',
       caller_agent_id: 'test',
-      person: 'kelvin',
+      person: 'mkkk',
       window: { start: '2026-05-12T09:00:00Z', end: '2026-05-12T11:00:00Z', tz: 'UTC' },
     });
     expect(resp).toMatchObject({
@@ -105,8 +105,8 @@ describe('rpc-server integration', () => {
       contract_id: 'calendar.query.v1',
       events: [
         {
-          id: 'p1',
-          calendar_id: CAL_IDS.primary,
+          id: 'm1',
+          calendar_id: CAL_IDS.mkkk,
           summary: 'standup',
         },
       ],
@@ -116,7 +116,7 @@ describe('rpc-server integration', () => {
   it('round-trips a valid calendar.find_free_slot.v1 envelope', async () => {
     cache.upsertEvent({
       id: 'b1',
-      calendarId: CAL_IDS.primary,
+      calendarId: CAL_IDS.mkkk,
       summary: 'block',
       startIso: '2026-05-12T09:00:00Z',
       endIso: '2026-05-12T10:00:00Z',
@@ -132,7 +132,7 @@ describe('rpc-server integration', () => {
       dedupe_key: 'sha256:y',
       source_ref: 'test',
       caller_agent_id: 'test',
-      participants: ['kelvin'],
+      participants: ['mkkk'],
       duration_min: 30,
       window: { start: '2026-05-12T08:00:00Z', end: '2026-05-12T18:00:00Z', tz: 'UTC' },
       working_hours: { start: '09:00', end: '17:00', days: [2] },
@@ -144,11 +144,26 @@ describe('rpc-server integration', () => {
     expect(resp.slots[0].start).toBe('2026-05-12T10:00:00.000Z');
   });
 
+  it('returns the unavailable envelope when person=kelvin reaches the RPC layer', async () => {
+    const resp = (await roundTrip(socketPath, {
+      contract_id: 'calendar.query.v1',
+      trace_id: '01890000-0000-7000-8000-00000000eeee',
+      dedupe_key: 'sha256:z',
+      source_ref: 'test',
+      caller_agent_id: 'test',
+      person: 'kelvin',
+      window: { start: '2026-05-12T09:00:00Z', end: '2026-05-12T11:00:00Z', tz: 'UTC' },
+    })) as { ok: boolean; status?: string; reason?: string };
+    expect(resp.ok).toBe(true);
+    expect(resp.status).toBe('unavailable');
+    expect(resp.reason).toBe('kelvin_calendar_not_accessible_per_no_impersonation_policy');
+  });
+
   it('returns bad_query on a malformed envelope', async () => {
     const resp = (await roundTrip(socketPath, {
       contract_id: 'calendar.query.v1',
       // Missing required fields.
-      person: 'kelvin',
+      person: 'mkkk',
     })) as { ok: boolean; code: string };
     expect(resp.ok).toBe(false);
     expect(resp.code).toBe('bad_query');
@@ -185,7 +200,7 @@ describe('rpc-server integration', () => {
       dedupe_key: 'k',
       source_ref: 't',
       caller_agent_id: 't',
-      person: 'kelvin',
+      person: 'mkkk',
       window: { start: '2026-05-12T09:00:00Z', end: '2026-05-12T17:00:00Z', tz: 'UTC' },
     })) as { ok: boolean; code: string };
     expect(resp.ok).toBe(false);

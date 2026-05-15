@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { calendar_v3 } from 'googleapis';
 import { CalendarCache } from '../cache.js';
-import { GoogleCalendarAdapter } from '../google-calendar-adapter.js';
+import { GoogleCalendarUserOauthAdapter } from '../google-calendar-user-oauth-adapter.js';
 import { CALENDAR_SYNC_RATE_PER_S, runSyncCycle } from '../sync-runner.js';
 import type { CalendarSlot } from '../calendar-config.js';
 
+// G6.5c: kelvin-only slots (primary, others) deprecated; calendar set
+// trimmed to the three non-kelvin shared calendars.
 const CAL_IDS: Record<CalendarSlot, string> = {
-  primary: 'cal-primary',
   mkkk: 'cal-mkkk',
-  others: 'cal-others',
   'mkkk-others': 'cal-mkkk-others',
   staff: 'cal-staff',
 };
@@ -46,8 +46,10 @@ function makeAdapter(opts: {
     nextSyncToken: string | null;
   }>;
   capturedCalls?: MockListEventsCall[];
-}): GoogleCalendarAdapter {
-  const adapter = Object.create(GoogleCalendarAdapter.prototype) as GoogleCalendarAdapter & {
+}): GoogleCalendarUserOauthAdapter {
+  const adapter = Object.create(
+    GoogleCalendarUserOauthAdapter.prototype,
+  ) as GoogleCalendarUserOauthAdapter & {
     listEvents: (o: {
       calendarId: string;
       syncToken?: string;
@@ -82,8 +84,8 @@ describe('runSyncCycle — happy path', () => {
   it('writes one event row per upserted event into the cache', async () => {
     const adapter = makeAdapter({
       responseFor: async (calId) => {
-        if (calId === 'cal-primary')
-          return { events: [evt('a'), evt('b')], nextSyncToken: 'tok-primary' };
+        if (calId === 'cal-mkkk')
+          return { events: [evt('a'), evt('b')], nextSyncToken: 'tok-mkkk' };
         return { events: [evt(`${calId}-x`)], nextSyncToken: `tok-${calId}` };
       },
     });
@@ -95,10 +97,10 @@ describe('runSyncCycle — happy path', () => {
       sleep: noopSleep,
     });
     expect(report.results.every((r) => r.status === 'ok')).toBe(true);
-    // 5 calendars × 1 event each + 1 extra on primary = 6
-    expect(report.results.reduce((a, r) => a + r.upserted, 0)).toBe(6);
+    // 3 calendars × 1 event each + 1 extra on mkkk = 4
+    expect(report.results.reduce((a, r) => a + r.upserted, 0)).toBe(4);
     const got = cache.eventsForRange({
-      calendars: ['cal-primary'],
+      calendars: ['cal-mkkk'],
       start: '2026-05-12T00:00:00+01:00',
       end: '2026-05-13T00:00:00+01:00',
     });
@@ -116,7 +118,7 @@ describe('runSyncCycle — happy path', () => {
       now: () => FROZEN_NOW,
       sleep: noopSleep,
     });
-    expect(cache.getSyncState('cal-primary')?.syncToken).toBe('tok-cal-primary');
+    expect(cache.getSyncState('cal-mkkk')?.syncToken).toBe('tok-cal-mkkk');
     expect(cache.getSyncState('cal-mkkk-others')?.syncToken).toBe('tok-cal-mkkk-others');
   });
 
@@ -138,14 +140,14 @@ describe('runSyncCycle — happy path', () => {
       now: () => FROZEN_NOW,
       sleep: noopSleep,
     });
-    const primary = report.results.find((r) => r.slot === 'primary')!;
-    expect(primary.upserted).toBe(1);
+    const mkkk = report.results.find((r) => r.slot === 'mkkk')!;
+    expect(mkkk.upserted).toBe(1);
   });
 });
 
 describe('runSyncCycle — incremental sync', () => {
   it('passes syncToken when prior state exists; passes timeMin when it does not', async () => {
-    cache.setSyncState('cal-primary', 'existing-tok', '2026-05-11T09:00:00Z');
+    cache.setSyncState('cal-mkkk', 'existing-tok', '2026-05-11T09:00:00Z');
     const captured: MockListEventsCall[] = [];
     const adapter = makeAdapter({
       capturedCalls: captured,
@@ -158,12 +160,12 @@ describe('runSyncCycle — incremental sync', () => {
       now: () => FROZEN_NOW,
       sleep: noopSleep,
     });
-    const primaryCall = captured.find((c) => c.calendarId === 'cal-primary')!;
-    expect(primaryCall.syncToken).toBe('existing-tok');
-    expect(primaryCall.timeMin).toBeUndefined();
     const mkkkCall = captured.find((c) => c.calendarId === 'cal-mkkk')!;
-    expect(mkkkCall.syncToken).toBeUndefined();
-    expect(mkkkCall.timeMin).toBe(
+    expect(mkkkCall.syncToken).toBe('existing-tok');
+    expect(mkkkCall.timeMin).toBeUndefined();
+    const staffCall = captured.find((c) => c.calendarId === 'cal-staff')!;
+    expect(staffCall.syncToken).toBeUndefined();
+    expect(staffCall.timeMin).toBe(
       new Date(FROZEN_NOW.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString(),
     );
   });
@@ -173,7 +175,7 @@ describe('runSyncCycle — AP-2 per-calendar isolation', () => {
   it('a single-calendar throw does not abort the other calendars', async () => {
     const adapter = makeAdapter({
       responseFor: async (calId) => {
-        if (calId === 'cal-others') throw new Error('quota exceeded');
+        if (calId === 'cal-mkkk-others') throw new Error('quota exceeded');
         return { events: [evt(`${calId}-x`)], nextSyncToken: `tok-${calId}` };
       },
     });
@@ -184,18 +186,18 @@ describe('runSyncCycle — AP-2 per-calendar isolation', () => {
       now: () => FROZEN_NOW,
       sleep: noopSleep,
     });
-    const others = report.results.find((r) => r.slot === 'others')!;
-    expect(others.status).toBe('error');
-    expect(others.errorMessage).toBe('quota exceeded');
+    const mkkkOthers = report.results.find((r) => r.slot === 'mkkk-others')!;
+    expect(mkkkOthers.status).toBe('error');
+    expect(mkkkOthers.errorMessage).toBe('quota exceeded');
     const ok = report.results.filter((r) => r.status === 'ok');
-    expect(ok.map((r) => r.slot).sort()).toEqual(['mkkk', 'mkkk-others', 'primary', 'staff']);
+    expect(ok.map((r) => r.slot).sort()).toEqual(['mkkk', 'staff']);
   });
 
   it('a failing calendar does not corrupt its prior sync_state', async () => {
-    cache.setSyncState('cal-others', 'prior-tok', '2026-05-11T09:00:00Z');
+    cache.setSyncState('cal-mkkk-others', 'prior-tok', '2026-05-11T09:00:00Z');
     const adapter = makeAdapter({
       responseFor: async (calId) => {
-        if (calId === 'cal-others') throw new Error('boom');
+        if (calId === 'cal-mkkk-others') throw new Error('boom');
         return { events: [], nextSyncToken: null };
       },
     });
@@ -206,7 +208,7 @@ describe('runSyncCycle — AP-2 per-calendar isolation', () => {
       now: () => FROZEN_NOW,
       sleep: noopSleep,
     });
-    expect(cache.getSyncState('cal-others')?.syncToken).toBe('prior-tok');
+    expect(cache.getSyncState('cal-mkkk-others')?.syncToken).toBe('prior-tok');
   });
 });
 
@@ -225,8 +227,8 @@ describe('runSyncCycle — pacing', () => {
         sleepCalls.push(ms);
       },
     });
-    // 5 calendars → 4 spacings between them.
-    expect(sleepCalls).toHaveLength(4);
+    // 3 calendars → 2 spacings between them.
+    expect(sleepCalls).toHaveLength(2);
     const expectedMs = Math.ceil(1000 / CALENDAR_SYNC_RATE_PER_S);
     expect(sleepCalls.every((ms) => ms === expectedMs)).toBe(true);
   });
@@ -254,7 +256,7 @@ describe('runSyncCycle — round-trip across re-runs', () => {
       now: () => FROZEN_NOW,
       sleep: noopSleep,
     });
-    for (const slot of ['primary', 'mkkk', 'others', 'mkkk-others', 'staff'] as const) {
+    for (const slot of ['mkkk', 'mkkk-others', 'staff'] as const) {
       const call = captured.find((c) => c.calendarId === CAL_IDS[slot])!;
       expect(call.syncToken).toBe('tok-after');
     }
@@ -279,13 +281,7 @@ describe('runSyncCycle — report shape', () => {
     });
     expect(report.startedAtIso).toBe(FROZEN_NOW.toISOString());
     expect(report.endedAtIso).toBe(FROZEN_NOW.toISOString());
-    expect(report.results.map((r) => r.slot)).toEqual([
-      'primary',
-      'mkkk',
-      'others',
-      'mkkk-others',
-      'staff',
-    ]);
-    expect(calls).toHaveBeenCalledTimes(5);
+    expect(report.results.map((r) => r.slot)).toEqual(['mkkk', 'mkkk-others', 'staff']);
+    expect(calls).toHaveBeenCalledTimes(3);
   });
 });

@@ -37,12 +37,16 @@ ExecStartPost=/bin/bash -c 'for i in $(seq 1 30); do [ -S /run/ai-calendar-advis
 RuntimeDirectory=ai-calendar-adviser
 RuntimeDirectoryMode=0755
 
-# DwD service-account key handed in via LoadCredential. The runtime
-# path resolves via $CREDENTIALS_DIRECTORY/dwd-key. The actual env-var
-# wiring (CALENDAR_DB_PATH, CALENDAR_SOCKET_PATH, calendar slot ids,
-# DWD_IMPERSONATE_SUBJECT) is done in .env. DWD_KEY_PATH is set in .env
-# to $CREDENTIALS_DIRECTORY/dwd-key (resolved at start time).
-LoadCredential=dwd-key:/etc/ai-calendar-adviser/dwd-key.json
+# Per-user OAuth refresh token (G6.5a + G6.5b) handed in via
+# LoadCredential. The runtime path resolves via
+# $CREDENTIALS_DIRECTORY/oauth-token. The actual env-var wiring
+# (CALENDAR_DB_PATH, CALENDAR_SOCKET_PATH, calendar slot ids,
+# OAUTH_TOKEN_PATH) is done in .env. OAUTH_TOKEN_PATH is set in .env to
+# $CREDENTIALS_DIRECTORY/oauth-token (resolved at start time). The
+# refresh token is bound to ai@liao.info; per
+# feedback_no_kelvin_account_impersonation, this agent never
+# authenticates as Kelvin.
+LoadCredential=oauth-token:/etc/ai-calendar-adviser/oauth-token.json
 
 # Hardening (mirrors ai-comms-adviser).
 NoNewPrivileges=true

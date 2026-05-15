@@ -4,11 +4,18 @@
  * Runs before any RPC binding or sync work; fails loud with a ranked-cause
  * diagnostic when a dependency is wrong. Three steps:
  *   1. OAuth round-trip via `calendarList.list` — proves credentials work.
- *   2. The 4 Google-backed slot ids resolve to calendars the impersonated
- *      identity can see — proves the typed slot enum matches reality.
+ *   2. The Google-backed slot ids resolve to calendars the authenticated
+ *      identity (`ai@liao.info`) can see — proves the typed slot enum
+ *      matches reality.
  *   3. One `events.list({ maxResults: 1 })` per calendar — proves each
  *      calendar is actually queryable (catches subtle ACL gaps the
  *      `calendarList` row alone misses).
+ *
+ * Auth model: per-user OAuth on `ai@liao.info` (G6.5a + G6.5b — non-
+ * impersonating refresh token at `OAUTH_TOKEN_PATH`). Kelvin's calendars
+ * are NOT reachable from this agent — see
+ * `feedback_no_kelvin_account_impersonation` and the `unavailable`
+ * envelope path in `handlers/calendar-query.ts`.
  *
  * Why ranked causes (AP-4): a single best-guess diagnostic ("token
  * expired") encourages whoever is paged to act on that guess instead of
@@ -21,8 +28,8 @@
 
 import type { CalendarSlot } from './calendar-config.js';
 import { CALENDAR_SLOTS, CalendarConfigError, loadCalendarIds } from './calendar-config.js';
-import type { GoogleCalendarAdapter } from './google-calendar-adapter.js';
-import { GoogleCalendarAdapter as DefaultAdapter } from './google-calendar-adapter.js';
+import type { GoogleCalendarUserOauthAdapter } from './google-calendar-user-oauth-adapter.js';
+import { GoogleCalendarUserOauthAdapter as DefaultAdapter } from './google-calendar-user-oauth-adapter.js';
 
 export type DependencyName =
   | 'calendar-config'
@@ -51,21 +58,21 @@ export class BootCheckError extends Error {
 
 export interface BootCheckDeps {
   /** Test seam — production callers omit. */
-  readonly adapter?: GoogleCalendarAdapter;
+  readonly adapter?: GoogleCalendarUserOauthAdapter;
   /** Test seam — production callers omit (defaults to process.env). */
   readonly env?: NodeJS.ProcessEnv;
 }
 
 const RANKED_CAUSES_OAUTH: readonly string[] = [
-  'DwD scope not authorized (Admin Console > API controls > Domain-wide Delegation: client_id 101397011922329106102 missing scope https://www.googleapis.com/auth/calendar.readonly)',
-  'Impersonation subject lost calendar access ($DWD_IMPERSONATE_SUBJECT no longer has the calendarId on their calendarList — share calendar or pick a different subject)',
-  'DwD key rotated / deleted (private_key in /etc/ai-calendar-adviser/dwd-key.json no longer valid; rotate via service account console)',
+  'OAuth refresh token missing or unreadable at $OAUTH_TOKEN_PATH (default /etc/ai-calendar-adviser/oauth-token.json) — run scripts/bootstrap-oauth.ts to mint a new one for ai@liao.info',
+  'OAuth refresh token revoked or expired (Google revokes tokens after 6 months of inactivity; re-run the bootstrap consent flow as ai@liao.info)',
+  'allowed_scopes in the token file does not include https://www.googleapis.com/auth/calendar.readonly (re-run bootstrap-oauth with --scopes=calendar.readonly)',
   'Google API outage / transient 5xx (check https://status.cloud.google.com/ and retry)',
 ];
 
 const RANKED_CAUSES_SLOT_RESOLVE: readonly string[] = [
   'Calendar id stale (the renamed/deleted/shared-away calendar means the CALENDAR_ID_<SLOT> env var no longer matches a calendarList row)',
-  'Impersonated identity lost access (the calendar was unshared from ai@liao.info)',
+  'ai@liao.info lost access (the calendar was unshared from ai@liao.info)',
   'Slot enum drift (the typed enum in calendar-config.ts no longer matches the workspace shape — the operator added/removed a domain without updating both files)',
 ];
 
@@ -82,7 +89,7 @@ const RANKED_CAUSES_EVENTS_LIST: readonly string[] = [
  */
 export async function runBootCheck(deps: BootCheckDeps = {}): Promise<{
   readonly calendarIds: Record<CalendarSlot, string>;
-  readonly adapter: GoogleCalendarAdapter;
+  readonly adapter: GoogleCalendarUserOauthAdapter;
 }> {
   const env = deps.env ?? process.env;
 
@@ -112,16 +119,11 @@ export async function runBootCheck(deps: BootCheckDeps = {}): Promise<{
     throw err;
   }
 
-  // Step 1 — DwD service-account load + calendarList enumeration.
-  let adapter: GoogleCalendarAdapter;
+  // Step 1 — per-user OAuth refresh token load + calendarList enumeration.
+  let adapter: GoogleCalendarUserOauthAdapter;
   let allCalendars;
   try {
-    adapter =
-      deps.adapter ??
-      DefaultAdapter.fromCredentialsFile({
-        keyFilePath: env.DWD_KEY_PATH,
-        subject: env.DWD_IMPERSONATE_SUBJECT,
-      });
+    adapter = deps.adapter ?? DefaultAdapter.fromTokenFile({});
   } catch (err) {
     throw new BootCheckError({
       level: 'fatal',
@@ -177,9 +179,9 @@ export async function runBootCheck(deps: BootCheckDeps = {}): Promise<{
   //
   // `singlePage: true` is load-bearing: the adapter's listEvents paginates
   // by default until the API stops returning nextPageToken. Without this
-  // flag, smoke-testing a busy calendar (e.g. kelvin@liao.info) fetches
-  // every event one page at a time, burning the per-user-per-minute Google
-  // Calendar quota in under a minute on cold boot.
+  // flag, smoke-testing a busy calendar fetches every event one page at a
+  // time, burning the per-user-per-minute Google Calendar quota in under a
+  // minute on cold boot.
   for (const slot of CALENDAR_SLOTS) {
     const id = calendarIds[slot];
     try {

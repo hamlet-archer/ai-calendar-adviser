@@ -1,31 +1,27 @@
 /**
- * Typed slot definitions for the 5 calendar domains owned by this agent.
+ * Typed slot definitions for the calendar domains owned by this agent.
  *
- * All 5 slots map 1:1 to Google Calendars now — `staff` was originally
- * scaffolded as a composed view (no Google id) but Kelvin confirmed
- * 2026-05-12 that it's a real shared calendar
- * (`c_552a7b…@group.calendar.google.com`).
+ * As of G6.5c (2026-05-15) the agent no longer reads Kelvin's calendars
+ * (per `feedback_no_kelvin_account_impersonation` — no service-side code
+ * path may impersonate Kelvin's account, and the migration deprecates the
+ * `primary` + `others` slots in favour of returning a documented
+ * `unavailable` envelope for `person='kelvin'` queries). The remaining
+ * three slots are all non-Kelvin shared calendars reachable from
+ * `ai@liao.info` via per-user OAuth.
  *
- * Values come from environment variables so the same code ships against
- * Kelvin's real workspace, a synthetic test workspace, or any future
- * impersonation target without a code change. The env-var convention is:
- *   CALENDAR_ID_PRIMARY      → primary
- *   CALENDAR_ID_MKKK         → mkkk
- *   CALENDAR_ID_OTHERS       → others
- *   CALENDAR_ID_MKKK_OTHERS  → mkkk-others
- *   CALENDAR_ID_STAFF        → staff
+ * Env-var convention:
+ *   CALENDAR_ID_MKKK         → mkkk          (household shared)
+ *   CALENDAR_ID_MKKK_OTHERS  → mkkk-others   (household + others)
+ *   CALENDAR_ID_STAFF        → staff         (real shared calendar
+ *                                             `c_552a7b…@group.calendar.google.com`)
  *
  * Per AP-3 (typed foreign-system identifiers): the slot enum is the typed
  * surface; the runtime mapping to Google ids is validated at boot, not at
  * call time.
- *
- * // PATCH-EXPIRY: 2026-08-12 owner=calendar-adviser reason=https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md (calendar-adviser sub-item 4 — staff slot promoted from composed-view to real calendar per Kelvin's 2026-05-12 confirmation)
  */
 
 export const CALENDAR_SLOTS = [
-  'primary',
   'mkkk',
-  'others',
   'mkkk-others',
   'staff',
 ] as const;
@@ -39,9 +35,7 @@ export function envVarForSlot(s: CalendarSlot): string {
 }
 
 export interface CalendarIdMap {
-  readonly primary: string;
   readonly mkkk: string;
-  readonly others: string;
   readonly 'mkkk-others': string;
   readonly staff: string;
 }
@@ -59,7 +53,7 @@ export class CalendarConfigError extends Error {
 /**
  * Load and validate calendar ids from the provided env. Throws
  * CalendarConfigError naming every unset / empty slot — single error vs.
- * 5 separate exit-1s, so the operator sees the full gap at once.
+ * separate exit-1s, so the operator sees the full gap at once.
  */
 export function loadCalendarIds(env: NodeJS.ProcessEnv = process.env): CalendarIdMap {
   const missing: CalendarSlot[] = [];

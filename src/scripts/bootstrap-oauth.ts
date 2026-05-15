@@ -45,8 +45,9 @@
  * script will succeed. That is a Kelvin-only browser step; the script
  * itself does not provision the client.
  *
- * No DwD anywhere. The refresh token is bound by Google to ai@liao.info;
- * impersonating Kelvin is not possible at the token-exchange layer.
+ * No service-account impersonation anywhere. The refresh token is bound
+ * by Google to ai@liao.info; impersonating Kelvin is not possible at the
+ * token-exchange layer.
  */
 
 import { exec } from 'node:child_process';
