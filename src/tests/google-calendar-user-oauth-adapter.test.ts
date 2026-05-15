@@ -1,15 +1,12 @@
 /**
  * GoogleCalendarUserOauthAdapter — per-user OAuth refresh-token adapter
- * for ai@liao.info. Replaces the DwD `GoogleCalendarAdapter` per the
- * 2026-05-13 security cut (G6.5a).
+ * for ai@liao.info. The only auth path for calendar reads (G6.5a + G6.5c).
  *
  * Covers:
  *   - factory: subject defaults + env override + forbidden-subject rejection
  *   - factory: token file missing / unparseable / invalid / scope missing
  *   - factory: happy path produces a working adapter (via test-seam client)
  *   - listCalendars / listEvents pagination + syncToken + singlePage
- *     (mirrors the GoogleCalendarAdapter test contract — call sites swap
- *     with minimal diff per G6.5a's row)
  *   - exchangeRefreshToken (the manual OAuth2 refresh path): happy path
  *     against a mocked token endpoint, scope-denied rejection,
  *     non-2xx error surface

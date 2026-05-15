@@ -6,10 +6,11 @@ import { CalendarCache } from '../../cache.js';
 import type { ContractEnvelope } from '../../contracts.js';
 import { handleFindFreeSlot } from '../../handlers/calendar-find-free-slot.js';
 
+// G6.5c: kelvin-only `primary` + `others` slots dropped — the agent no
+// longer reads kelvin@liao.info calendars. Tests now use mkkk + staff
+// for non-kelvin scheduling scenarios.
 const CAL_IDS = {
-  primary: 'kelvin-primary@google',
   mkkk: 'mkkk-primary@google',
-  others: 'kelvin-others@google',
   'mkkk-others': 'mkkk-others@google',
   staff: 'staff@group.calendar.google.com',
 } as const;
@@ -35,7 +36,7 @@ function ffsEnvelope(overrides: Record<string, unknown> = {}): ContractEnvelope 
     dedupe_key: 'sha256:test',
     source_ref: 'test',
     caller_agent_id: 'test',
-    participants: ['kelvin'],
+    participants: ['mkkk'],
     duration_min: 30,
     window: {
       start: '2026-05-12T08:00:00Z',
@@ -62,10 +63,34 @@ describe('handleFindFreeSlot', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('returns the unavailable envelope when participants includes kelvin (G6.5c)', () => {
+    const res = handleFindFreeSlot(ffsEnvelope({ participants: ['kelvin'] }), {
+      cache,
+      calendarIds: CAL_IDS,
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect('status' in res ? res.status : null).toBe('unavailable');
+    expect('reason' in res ? res.reason : null).toBe(
+      'kelvin_calendar_not_accessible_per_no_impersonation_policy',
+    );
+  });
+
+  it('also returns unavailable when kelvin is one of multiple participants', () => {
+    const res = handleFindFreeSlot(ffsEnvelope({ participants: ['kelvin', 'mkkk'] }), {
+      cache,
+      calendarIds: CAL_IDS,
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect('status' in res ? res.status : null).toBe('unavailable');
+  });
+
   it('returns the entire working-hours band as one slot when calendar is empty', () => {
     const res = handleFindFreeSlot(ffsEnvelope(), { cache, calendarIds: CAL_IDS });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     expect(res.slots.length).toBeGreaterThan(0);
     expect(res.slots[0].start).toBe('2026-05-12T09:00:00.000Z');
     // Truncated to durationMin = 30.
@@ -74,34 +99,37 @@ describe('handleFindFreeSlot', () => {
 
   it('skips busy intervals — slot is found in the gap after a meeting', () => {
     // Block 09:00 → 10:30 → free slot should start at 10:30
-    seedEvent(cache, 'm1', CAL_IDS.primary, '2026-05-12T09:00:00Z', '2026-05-12T10:30:00Z');
+    seedEvent(cache, 'm1', CAL_IDS.mkkk, '2026-05-12T09:00:00Z', '2026-05-12T10:30:00Z');
     const res = handleFindFreeSlot(ffsEnvelope(), { cache, calendarIds: CAL_IDS });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     expect(res.slots[0].start).toBe('2026-05-12T10:30:00.000Z');
   });
 
   it('honours min_break_minutes — slot does not abut the prior busy event', () => {
-    seedEvent(cache, 'm1', CAL_IDS.primary, '2026-05-12T09:00:00Z', '2026-05-12T10:00:00Z');
+    seedEvent(cache, 'm1', CAL_IDS.mkkk, '2026-05-12T09:00:00Z', '2026-05-12T10:00:00Z');
     const res = handleFindFreeSlot(ffsEnvelope({ min_break_minutes: 15 }), {
       cache,
       calendarIds: CAL_IDS,
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     // The 10:00 event end + 15-min break pushes the earliest slot to 10:15.
     expect(res.slots[0].start).toBe('2026-05-12T10:15:00.000Z');
   });
 
   it('intersects multiple participants — busy on either side blocks the slot', () => {
-    seedEvent(cache, 'k', CAL_IDS.primary, '2026-05-12T09:00:00Z', '2026-05-12T10:00:00Z');
-    seedEvent(cache, 'm', CAL_IDS.mkkk, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
+    seedEvent(cache, 'm', CAL_IDS.mkkk, '2026-05-12T09:00:00Z', '2026-05-12T10:00:00Z');
+    seedEvent(cache, 's', CAL_IDS.staff, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
     const res = handleFindFreeSlot(
-      ffsEnvelope({ participants: ['kelvin', 'mkkk'] }),
+      ffsEnvelope({ participants: ['mkkk', 'sally'] }),
       { cache, calendarIds: CAL_IDS },
     );
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     // Both calendars combined have 09:00-11:00 busy → earliest 30-min slot
     // starts at 11:00.
     expect(res.slots[0].start).toBe('2026-05-12T11:00:00.000Z');
@@ -109,10 +137,11 @@ describe('handleFindFreeSlot', () => {
 
   it('returns no slots if entire working day is blocked', () => {
     // Single all-day block 09:00 → 17:00.
-    seedEvent(cache, 'all', CAL_IDS.primary, '2026-05-12T09:00:00Z', '2026-05-12T17:00:00Z');
+    seedEvent(cache, 'all', CAL_IDS.mkkk, '2026-05-12T09:00:00Z', '2026-05-12T17:00:00Z');
     const res = handleFindFreeSlot(ffsEnvelope(), { cache, calendarIds: CAL_IDS });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     expect(res.slots).toEqual([]);
   });
 
@@ -124,6 +153,7 @@ describe('handleFindFreeSlot', () => {
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     expect(res.slots).toHaveLength(3);
     // Earliest-first.
     for (let i = 1; i < res.slots.length; i += 1) {
@@ -154,17 +184,19 @@ describe('handleFindFreeSlot', () => {
     );
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     expect(res.slots).toEqual([]);
   });
 
   it('treats ai-doer as always-free (contributes no busy time)', () => {
-    seedEvent(cache, 'k', CAL_IDS.primary, '2026-05-12T09:00:00Z', '2026-05-12T17:00:00Z');
+    seedEvent(cache, 'm', CAL_IDS.mkkk, '2026-05-12T09:00:00Z', '2026-05-12T17:00:00Z');
     const res = handleFindFreeSlot(
       ffsEnvelope({ participants: ['ai-doer'] }),
       { cache, calendarIds: CAL_IDS },
     );
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected slots, got unavailable');
     // ai-doer contributes no calendars → no busy time → full working day available.
     expect(res.slots.length).toBeGreaterThan(0);
     expect(res.slots[0].start).toBe('2026-05-12T09:00:00.000Z');

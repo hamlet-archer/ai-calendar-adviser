@@ -14,8 +14,9 @@ StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=300
 
-# DwD service-account key — same shape as the RPC daemon's LoadCredential.
-LoadCredential=dwd-key:/etc/ai-calendar-adviser/dwd-key.json
+# Per-user OAuth refresh token (G6.5a + G6.5b) — same shape as the RPC
+# daemon's LoadCredential. Bound to ai@liao.info, not Kelvin.
+LoadCredential=oauth-token:/etc/ai-calendar-adviser/oauth-token.json
 
 # Hardening (mirrors ai-comms-adviser shape).
 NoNewPrivileges=yes

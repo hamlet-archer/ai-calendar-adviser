@@ -45,6 +45,20 @@ export interface FindFreeSlotResponse {
   }>;
 }
 
+/**
+ * G6.5c: kelvin@-bound participants resolve to a documented unavailable
+ * envelope — same shape as the calendar-query handler. Per
+ * `feedback_no_kelvin_account_impersonation`, the agent no longer reads
+ * Kelvin's calendars at all.
+ */
+export interface FindFreeSlotUnavailable {
+  readonly ok: true;
+  readonly contract_id: 'calendar.find_free_slot.v1';
+  readonly trace_id: string;
+  readonly status: 'unavailable';
+  readonly reason: 'kelvin_calendar_not_accessible_per_no_impersonation_policy';
+}
+
 // Per contract: max 14-day search window.
 const MAX_SEARCH_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -220,7 +234,7 @@ function eventToInterval(ev: EventRow): Interval | null {
 export function handleFindFreeSlot(
   envelope: ContractEnvelope,
   deps: CalendarFindFreeSlotDeps,
-): FindFreeSlotResponse | HandlerError {
+): FindFreeSlotResponse | FindFreeSlotUnavailable | HandlerError {
   const window = envelope.window as { start: string; end: string; tz: string };
   const windowStartMs = Date.parse(window.start);
   const windowEndMs = Date.parse(window.end);
@@ -235,7 +249,22 @@ export function handleFindFreeSlot(
     return { ok: false, code: 'bad_query', message: 'window span exceeds 14 days' };
   }
 
-  const participants = envelope.participants as readonly Person[];
+  const participantsRaw = envelope.participants as readonly string[];
+  // G6.5c: any kelvin participant resolves to a documented unavailable
+  // envelope (per `feedback_no_kelvin_account_impersonation`). We refuse
+  // to compute a partial-availability slot list with Kelvin silently
+  // omitted — that would let a caller schedule over Kelvin without ever
+  // seeing his calendar.
+  if (participantsRaw.includes('kelvin')) {
+    return {
+      ok: true,
+      contract_id: 'calendar.find_free_slot.v1',
+      trace_id: envelope.trace_id,
+      status: 'unavailable',
+      reason: 'kelvin_calendar_not_accessible_per_no_impersonation_policy',
+    };
+  }
+  const participants = participantsRaw as readonly Person[];
   const durationMin = envelope.duration_min as number;
   const durationMs = durationMin * 60 * 1000;
   const minBreakMin = (envelope.min_break_minutes as number | undefined) ?? 0;

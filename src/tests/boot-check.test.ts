@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BootCheckError, runBootCheck } from '../boot-check.js';
-import { GoogleCalendarAdapter } from '../google-calendar-adapter.js';
+import { GoogleCalendarUserOauthAdapter } from '../google-calendar-user-oauth-adapter.js';
 
+// G6.5c: kelvin-only slots (primary, others) deprecated; the remaining
+// three are non-kelvin shared calendars reachable from ai@liao.info.
 const VALID_ENV = {
-  CALENDAR_ID_PRIMARY: 'cal-primary',
   CALENDAR_ID_MKKK: 'cal-mkkk',
-  CALENDAR_ID_OTHERS: 'cal-others',
   CALENDAR_ID_MKKK_OTHERS: 'cal-mkkk-others',
   CALENDAR_ID_STAFF: 'cal-staff',
 };
@@ -13,20 +13,20 @@ const VALID_ENV = {
 function adapterFromMocks(opts: {
   listCalendars?: () => Promise<Array<{ id: string }>>;
   listEvents?: (id: string) => Promise<void>;
-}): GoogleCalendarAdapter {
+}): GoogleCalendarUserOauthAdapter {
   const listCalendars =
     opts.listCalendars ??
     (async () => [
-      { id: 'cal-primary' },
       { id: 'cal-mkkk' },
-      { id: 'cal-others' },
       { id: 'cal-mkkk-others' },
       { id: 'cal-staff' },
     ]);
   const listEvents = opts.listEvents ?? (async () => undefined);
   // Cast — we don't construct a real calendar_v3.Calendar; we hand the
   // adapter exactly the surface the boot-check uses.
-  const adapter = Object.create(GoogleCalendarAdapter.prototype) as GoogleCalendarAdapter & {
+  const adapter = Object.create(
+    GoogleCalendarUserOauthAdapter.prototype,
+  ) as GoogleCalendarUserOauthAdapter & {
     listCalendars: () => Promise<unknown>;
     listEvents: (opts: { calendarId: string }) => Promise<unknown>;
   };
@@ -39,11 +39,12 @@ function adapterFromMocks(opts: {
 }
 
 describe('runBootCheck — happy path', () => {
-  it('returns the validated id map + adapter when all 4 slots resolve', async () => {
+  it('returns the validated id map + adapter when all slots resolve', async () => {
     const adapter = adapterFromMocks({});
     const { calendarIds } = await runBootCheck({ adapter, env: VALID_ENV });
-    expect(calendarIds.primary).toBe('cal-primary');
+    expect(calendarIds.mkkk).toBe('cal-mkkk');
     expect(calendarIds['mkkk-others']).toBe('cal-mkkk-others');
+    expect(calendarIds.staff).toBe('cal-staff');
   });
 
   it('issues exactly one listEvents call per slot', async () => {
@@ -54,13 +55,7 @@ describe('runBootCheck — happy path', () => {
       },
     });
     await runBootCheck({ adapter, env: VALID_ENV });
-    expect(seen.sort()).toEqual([
-      'cal-mkkk',
-      'cal-mkkk-others',
-      'cal-others',
-      'cal-primary',
-      'cal-staff',
-    ]);
+    expect(seen.sort()).toEqual(['cal-mkkk', 'cal-mkkk-others', 'cal-staff']);
   });
 });
 
@@ -77,7 +72,7 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
     }
     expect(caught).toBeInstanceOf(BootCheckError);
     expect(caught?.diagnostic.step).toBe('calendar-config');
-    expect(caught?.diagnostic.ranked_causes[0]).toMatch(/CALENDAR_ID_PRIMARY/);
+    expect(caught?.diagnostic.ranked_causes[0]).toMatch(/CALENDAR_ID_/);
     expect(caught?.diagnostic.ranked_causes.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -95,15 +90,14 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
     }
     expect(caught?.diagnostic.step).toBe('google-calendar-list');
     expect(caught?.diagnostic.upstream_error).toBe('invalid_grant');
-    expect(caught?.diagnostic.ranked_causes[0]).toMatch(/DwD scope not authorized/);
+    expect(caught?.diagnostic.ranked_causes[0]).toMatch(/OAuth refresh token/);
   });
 
   it('step google-calendar-slot-resolve: omit one calendarId → names the missing slot', async () => {
     const adapter = adapterFromMocks({
       listCalendars: async () => [
-        { id: 'cal-primary' },
         { id: 'cal-mkkk' },
-        { id: 'cal-others' },
+        { id: 'cal-staff' },
         // mkkk-others deliberately absent
       ],
     });
@@ -129,13 +123,13 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
       caught = err as BootCheckError;
     }
     expect(caught?.diagnostic.step).toBe('google-calendar-slot-resolve');
-    expect(caught?.diagnostic.upstream_error).toMatch(/^5 of 5/);
+    expect(caught?.diagnostic.upstream_error).toMatch(/^3 of 3/);
   });
 
   it('step google-events-list: per-calendar 403 surfaces with the offending slot in detail', async () => {
     const adapter = adapterFromMocks({
       listEvents: async (id) => {
-        if (id === 'cal-others') throw new Error('Forbidden 403');
+        if (id === 'cal-staff') throw new Error('Forbidden 403');
       },
     });
     let caught: BootCheckError | null = null;
@@ -146,8 +140,8 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
     }
     expect(caught?.diagnostic.step).toBe('google-events-list');
     expect(caught?.diagnostic.upstream_error).toBe('Forbidden 403');
-    expect(caught?.diagnostic.detail?.slot).toBe('others');
-    expect(caught?.diagnostic.detail?.calendar_id).toBe('cal-others');
+    expect(caught?.diagnostic.detail?.slot).toBe('staff');
+    expect(caught?.diagnostic.detail?.calendar_id).toBe('cal-staff');
     expect(caught?.diagnostic.ranked_causes[0]).toMatch(/ACL gap/);
   });
 
@@ -172,7 +166,7 @@ describe('runBootCheck — failure branches produce ranked-cause diagnostics', (
         runBootCheck({
           adapter: adapterFromMocks({
             listEvents: async (id) => {
-              if (id === 'cal-primary') throw new Error('403');
+              if (id === 'cal-mkkk') throw new Error('403');
             },
           }),
           env: VALID_ENV,
@@ -206,7 +200,7 @@ describe('runBootCheck — boot ordering', () => {
   it('does not call listEvents when slot resolution fails', async () => {
     const eventsCalls = vi.fn(async () => undefined);
     const adapter = adapterFromMocks({
-      listCalendars: async () => [{ id: 'cal-primary' }],
+      listCalendars: async () => [{ id: 'cal-mkkk' }],
       listEvents: eventsCalls,
     });
     await expect(runBootCheck({ adapter, env: VALID_ENV })).rejects.toBeInstanceOf(BootCheckError);

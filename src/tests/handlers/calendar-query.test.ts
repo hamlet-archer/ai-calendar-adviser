@@ -6,10 +6,10 @@ import { CalendarCache } from '../../cache.js';
 import type { ContractEnvelope } from '../../contracts.js';
 import { handleCalendarQuery } from '../../handlers/calendar-query.js';
 
+// G6.5c: kelvin-only `primary` + `others` slots dropped — the agent no
+// longer reads kelvin@liao.info calendars.
 const CAL_IDS = {
-  primary: 'kelvin-primary@google',
   mkkk: 'mkkk-primary@google',
-  others: 'kelvin-others@google',
   'mkkk-others': 'mkkk-others@google',
   staff: 'staff@group.calendar.google.com',
 } as const;
@@ -35,7 +35,7 @@ function queryEnvelope(overrides: Record<string, unknown> = {}): ContractEnvelop
     dedupe_key: 'sha256:test',
     source_ref: 'test',
     caller_agent_id: 'test',
-    person: 'kelvin',
+    person: 'mkkk',
     window: {
       start: '2026-05-12T09:00:00Z',
       end: '2026-05-12T17:00:00Z',
@@ -59,21 +59,40 @@ describe('handleCalendarQuery', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('returns events for kelvin from primary + others', () => {
-    seedEvent(cache, 'p1', CAL_IDS.primary, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
-    seedEvent(cache, 'o1', CAL_IDS.others, '2026-05-12T14:00:00Z', '2026-05-12T15:00:00Z');
-    seedEvent(cache, 'm1', CAL_IDS.mkkk, '2026-05-12T12:00:00Z', '2026-05-12T13:00:00Z');
-
-    const res = handleCalendarQuery(queryEnvelope(), { cache, calendarIds: CAL_IDS });
+  it('returns the unavailable envelope for person=kelvin (G6.5c — no impersonation)', () => {
+    const res = handleCalendarQuery(queryEnvelope({ person: 'kelvin' }), {
+      cache,
+      calendarIds: CAL_IDS,
+    });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    const ids = res.events.map((e) => e.id).sort();
-    expect(ids).toEqual(['o1', 'p1']);
-    expect(res.queried_calendars.sort()).toEqual([CAL_IDS.others, CAL_IDS.primary].sort());
+    expect('status' in res ? res.status : null).toBe('unavailable');
+    expect('reason' in res ? res.reason : null).toBe(
+      'kelvin_calendar_not_accessible_per_no_impersonation_policy',
+    );
+  });
+
+  it('returns the unavailable envelope when explicit calendars include calendar.primary', () => {
+    const res = handleCalendarQuery(
+      queryEnvelope({ person: 'mkkk', calendars: ['calendar.primary'] }),
+      { cache, calendarIds: CAL_IDS },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect('status' in res ? res.status : null).toBe('unavailable');
+  });
+
+  it('returns the unavailable envelope when explicit calendars include calendar.others', () => {
+    const res = handleCalendarQuery(
+      queryEnvelope({ person: 'mkkk', calendars: ['calendar.others'] }),
+      { cache, calendarIds: CAL_IDS },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect('status' in res ? res.status : null).toBe('unavailable');
   });
 
   it('routes mkkk to mkkk + mkkk-others', () => {
-    seedEvent(cache, 'p1', CAL_IDS.primary, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
     seedEvent(cache, 'm1', CAL_IDS.mkkk, '2026-05-12T12:00:00Z', '2026-05-12T13:00:00Z');
     seedEvent(cache, 'mo1', CAL_IDS['mkkk-others'], '2026-05-12T15:00:00Z', '2026-05-12T16:00:00Z');
 
@@ -83,32 +102,35 @@ describe('handleCalendarQuery', () => {
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected events response, got unavailable');
     expect(res.events.map((e) => e.id).sort()).toEqual(['m1', 'mo1']);
   });
 
   it('returns empty events for ai-doer (always-free, no calendar)', () => {
-    seedEvent(cache, 'p1', CAL_IDS.primary, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
+    seedEvent(cache, 'm1', CAL_IDS.mkkk, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
     const res = handleCalendarQuery(queryEnvelope({ person: 'ai-doer' }), {
       cache,
       calendarIds: CAL_IDS,
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected events response, got unavailable');
     expect(res.events).toEqual([]);
     expect(res.queried_calendars).toEqual([]);
   });
 
-  it('respects an explicit calendars override', () => {
-    seedEvent(cache, 'p1', CAL_IDS.primary, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
-    seedEvent(cache, 'o1', CAL_IDS.others, '2026-05-12T14:00:00Z', '2026-05-12T15:00:00Z');
+  it('respects an explicit non-kelvin calendars override (staff.schedules)', () => {
+    seedEvent(cache, 's1', CAL_IDS.staff, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
+    seedEvent(cache, 'm1', CAL_IDS.mkkk, '2026-05-12T14:00:00Z', '2026-05-12T15:00:00Z');
 
     const res = handleCalendarQuery(
-      queryEnvelope({ calendars: ['calendar.primary'] }),
+      queryEnvelope({ person: 'sally', calendars: ['staff.schedules'] }),
       { cache, calendarIds: CAL_IDS },
     );
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.events.map((e) => e.id)).toEqual(['p1']);
+    if ('status' in res) throw new Error('expected events response, got unavailable');
+    expect(res.events.map((e) => e.id)).toEqual(['s1']);
   });
 
   it('reports truncated when results exceed limit', () => {
@@ -116,17 +138,18 @@ describe('handleCalendarQuery', () => {
       seedEvent(
         cache,
         `e${i}`,
-        CAL_IDS.primary,
+        CAL_IDS.mkkk,
         `2026-05-12T1${i}:00:00Z`,
         `2026-05-12T1${i}:30:00Z`,
       );
     }
-    const res = handleCalendarQuery(queryEnvelope({ limit: 2 }), {
+    const res = handleCalendarQuery(queryEnvelope({ person: 'mkkk', limit: 2 }), {
       cache,
       calendarIds: CAL_IDS,
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    if ('status' in res) throw new Error('expected events response, got unavailable');
     expect(res.events).toHaveLength(2);
     expect(res.truncated).toBe(true);
   });

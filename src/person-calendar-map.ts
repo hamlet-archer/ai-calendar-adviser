@@ -4,25 +4,27 @@
  *
  * Mapping mirrors `registry/agents/calendar-adviser.yaml` ownership + the
  * `calendar.query.v1` contract description:
- *   kelvin   → primary + others
  *   mkkk     → mkkk + mkkk-others
  *   sally    → staff
  *   chloe    → staff
  *   ai-doer  → empty (24/7 working; no calendar)
  *
+ * `kelvin` is intentionally absent from `Person`: per G6.5c
+ * (`feedback_no_kelvin_account_impersonation`) the agent no longer reads
+ * Kelvin's calendars. `calendar.query.v1({person:'kelvin'})` returns a
+ * documented `unavailable` envelope rather than fanning out to calendar
+ * slots that no longer exist.
+ *
  * Note: the contract enum uses `staff.schedules` as the domain string; the
  * agent maps that to slot `staff` (a real Google calendar
- * `c_552a7b…@group.calendar.google.com`, confirmed 2026-05-12 — earlier
- * scaffold treated it as a composed view, but Kelvin's calendar set
- * includes a real shared Staff calendar).
+ * `c_552a7b…@group.calendar.google.com`).
  */
 
 import type { CalendarSlot } from './calendar-config.js';
 
-export type Person = 'kelvin' | 'sally' | 'chloe' | 'mkkk' | 'ai-doer';
+export type Person = 'sally' | 'chloe' | 'mkkk' | 'ai-doer';
 
 const PERSON_SLOTS: Record<Person, readonly CalendarSlot[]> = {
-  kelvin: ['primary', 'others'],
   mkkk: ['mkkk', 'mkkk-others'],
   sally: ['staff'],
   chloe: ['staff'],
