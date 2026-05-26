@@ -12,8 +12,13 @@
 # Stable runtime path: /opt/ai-calendar-adviser-deploy/pull-deploy.sh
 # (lives outside /opt/ai-calendar-adviser so git resets inside the repo
 # cannot wipe it). Source of truth is the copy in this repo at
-# scripts/pull-deploy.sh; deploy.sh self-installs the stable copy on
-# each successful run.
+# scripts/pull-deploy.sh; the puller self-installs the stable copy
+# IMMEDIATELY after git fetch, BEFORE invoking deploy.sh — see N17 in
+# ai-ops-meta architect-backlog.md. Doing the self-install last meant
+# every code-change deploy that tripped over the npm EACCES at line 22
+# of deploy.sh (since 2026-05-13) failed to ship the new pull-deploy.sh,
+# so observability + deploy-script fixes couldn't reach production until
+# the underlying daemon-restart issue was resolved.
 
 set -euo pipefail
 
@@ -79,17 +84,42 @@ fi
 
 echo "HEAD differs (${LOCAL:0:7} → ${REMOTE:0:7}); delegating to ${DEPLOY_SCRIPT}"
 
-# deploy.sh reads ${REMOTE} via its own git fetch + reset; we just hand off.
-"$DEPLOY_SCRIPT"
-
-# Self-update the stable copy after the deploy succeeds, so the next
-# timer tick uses whatever version of this script we just pulled.
-# `install` writes-then-renames atomically — safe to overwrite the file
-# currently executing.
-if [[ -f "$REPO_DIR/scripts/pull-deploy.sh" ]] && [[ "$(realpath "$0")" == "$STABLE_PATH" ]]; then
-  install -m 755 "$REPO_DIR/scripts/pull-deploy.sh" "$STABLE_PATH"
+# N17 — self-update the stable copy IMMEDIATELY, BEFORE deploy.sh runs.
+# Read the new pull-deploy.sh straight out of origin/$BRANCH via `git show`
+# (no working-tree reset needed — deploy.sh will do that itself). If
+# deploy.sh later fails (npm ci EACCES, build break, daemon refuse-to-
+# start), the next timer tick already runs the newest pull-deploy.sh and
+# can deliver fixes that depend on the puller's own logic.
+#
+# `install` is atomic (writes-then-renames) — safe even when the source
+# file equals the currently-executing script. Resolve both sides via
+# `realpath` so platform-specific symlinks (e.g. macOS `/var` → `/private/var`
+# under tmpdir, which the smoke test exercises) don't defeat the equality
+# check.
+SELF_REAL="$(realpath "$0")"
+STABLE_REAL="$(realpath "$STABLE_PATH" 2>/dev/null || echo "$STABLE_PATH")"
+if [[ "$SELF_REAL" == "$STABLE_REAL" ]]; then
+  TMP_PULLER="$(mktemp)"
+  if git show "origin/$BRANCH:scripts/pull-deploy.sh" > "$TMP_PULLER" 2>/dev/null \
+     && [[ -s "$TMP_PULLER" ]]; then
+    install -m 755 "$TMP_PULLER" "$STABLE_PATH"
+    echo "self-installed updated pull-deploy.sh (from origin/$BRANCH) before deploy"
+  fi
+  rm -f "$TMP_PULLER"
 fi
 
-# Post-deploy: probe daemon again (deploy.sh may restart the unit; a
+# deploy.sh reads ${REMOTE} via its own git fetch + reset; we just hand off.
+# Use `||` to capture deploy failures so the post-deploy probe still runs
+# and we exit with the underlying status. Without this, `set -e` would
+# silently swallow the daemon-probe (= the only observability we have).
+deploy_status=0
+"$DEPLOY_SCRIPT" || deploy_status=$?
+
+# Post-deploy: probe daemon (deploy.sh may have restarted the unit; a
 # failed restart should still surface here).
 probe_daemon || true
+
+# Propagate deploy failure if any — the systemd Result=exit-code is the
+# audit signal step 2.6.1 in operator-runner.md uses to gate close-the-
+# row.
+exit $deploy_status
