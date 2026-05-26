@@ -115,6 +115,46 @@ fi
 deploy_status=0
 "$DEPLOY_SCRIPT" || deploy_status=$?
 
+# B8.10.3 — post-daemon-reload systemd-unit drift check. Mirrors the
+# B8.10.2 block in ai-comms-adviser/scripts/deploy.sh, but hooked in the
+# puller (not the deploy script) because ai-calendar-adviser's deploy.sh
+# lives at /opt/ai-calendar-adviser-deploy/deploy.sh on the VPS — NOT in
+# this repo — so the drift check cannot ride inside the daemon-reload
+# subshell the way ai-comms-adviser's does. The puller is the closest
+# in-repo hook point after deploy.sh's daemon-reload.
+#
+# Only runs when deploy.sh succeeded. On any drift between
+# `systemctl cat <unit>` (with the `# /etc/systemd/system/<unit>` header
+# stripped via tail -n +2) and the in-repo `deploy/systemd/<unit>` file,
+# log the unit name + unified diff to stderr and set deploy_status=1.
+# The puller's systemd unit Result=exit-code then propagates and the
+# dashboard's `/health` page flips ai-calendar-adviser red within one
+# heartbeat — matching the operator_observable for B8.10.3 (and the
+# parent B8.10 row).
+#
+# Catches: (a) manual edits to /etc/systemd/system that bypassed deploy.sh's
+# unit-file sync, (b) a future regression of that sync, (c) drop-in files
+# under /etc/systemd/system/<unit>.d/ that change effective unit text.
+if [[ "$deploy_status" -eq 0 ]]; then
+  drift_ok=1
+  shopt -s nullglob
+  for unit_path in "$REPO_DIR"/deploy/systemd/*.service "$REPO_DIR"/deploy/systemd/*.timer; do
+    unit_name=$(basename "$unit_path")
+    diff_tmp=$(mktemp)
+    if ! diff -u <("$SYSTEMCTL_BIN" cat "$unit_name" 2>/dev/null | tail -n +2) "$unit_path" > "$diff_tmp" 2>&1; then
+      echo "drift: $unit_name differs between systemctl-cat and $unit_path" >&2
+      cat "$diff_tmp" >&2
+      drift_ok=
+    fi
+    rm -f "$diff_tmp"
+  done
+  shopt -u nullglob
+  if [[ -z "${drift_ok:-}" ]]; then
+    echo "B8.10.3 drift check FAILED — running systemd unit text differs from in-repo deploy/systemd/" >&2
+    deploy_status=1
+  fi
+fi
+
 # Post-deploy: probe daemon (deploy.sh may have restarted the unit; a
 # failed restart should still surface here).
 probe_daemon || true
