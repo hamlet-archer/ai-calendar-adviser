@@ -1,0 +1,83 @@
+name: check-deploy-guard
+
+# B8.3 (AP-8) — structural CI guard that fails any PR which removes
+# scripts/pull-deploy.sh's load-bearing invariants.
+#
+# ai-calendar-adviser uses a split deploy: the puller (scripts/pull-deploy.sh)
+# lives in this repo and is self-installed onto the VPS at
+# /opt/ai-calendar-adviser-deploy/pull-deploy.sh, but the heavy-lifting
+# deploy script (/opt/ai-calendar-adviser-deploy/deploy.sh) does NOT live
+# in this repo — it's a VPS-side artifact installed out-of-band. Because
+# of that, B8.3 cannot mirror B8.2's "grep scripts/deploy.sh for git reset"
+# guard verbatim; the actual reset happens in a file that isn't here to
+# check.
+#
+# What CAN be guarded is the puller's contribution to the deploy
+# contract — three structural invariants whose silent removal would
+# turn pull-deploy back into the silent-failure surface N15 + N17 just
+# closed:
+#
+#   1. `set -euo pipefail` — fail-loud bash mode. Without this, an
+#      intermediate command failing mid-tick (git fetch, install,
+#      systemctl probe) gets swallowed and the puller keeps running on
+#      stale state.
+#   2. Self-install via `install -m 755 ... "$STABLE_PATH"` (the N17
+#      fix). Without this, the stable puller copy never updates and
+#      every code-change deploy that tripped over deploy.sh's prior
+#      EACCES couldn't ship the new puller.
+#   3. `exit $deploy_status` — propagate deploy.sh's exit code. Without
+#      this, a deploy failure is treated as success and the next
+#      cycle's deploy-verification sweep marks the row [x] when prod
+#      is still on the old code.
+#
+# Same blast-radius semantics as B8.1 / B8.2 (deployed code MUST match
+# a committed HEAD on origin/main + every layer of the deploy chain
+# fail-loud on error); different mechanical signatures because the
+# script being guarded is the puller, not the resetter.
+#
+# Reading: https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md#b8
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/pull-deploy.sh'
+      - '.github/workflows/check-deploy-guard.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/pull-deploy.sh'
+      - '.github/workflows/check-deploy-guard.yml'
+
+jobs:
+  no-silent-puller-failure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify scripts/pull-deploy.sh exists
+        run: |
+          test -f scripts/pull-deploy.sh || {
+            echo "::error::scripts/pull-deploy.sh missing — B8.3 (AP-8) requires the in-repo puller"
+            exit 1
+          }
+
+      - name: Verify scripts/pull-deploy.sh fails loud + self-installs + propagates deploy exit code
+        run: |
+          if ! grep -qE 'set -euo pipefail' scripts/pull-deploy.sh; then
+            echo "::error file=scripts/pull-deploy.sh::B8.3 (AP-8) guard removed — pull-deploy.sh no longer enables 'set -euo pipefail'"
+            echo "  rationale: without fail-loud bash, intermediate failures (git fetch, install, systemctl probe) get swallowed and the puller keeps running on stale state."
+            echo "  see: https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md#b8"
+            exit 1
+          fi
+          if ! grep -qE 'install -m 755 .* "\$STABLE_PATH"' scripts/pull-deploy.sh; then
+            echo "::error file=scripts/pull-deploy.sh::B8.3 (AP-8) guard removed — pull-deploy.sh no longer self-installs the stable copy via 'install -m 755 ... \"\$STABLE_PATH\"'"
+            echo "  rationale: this is the N17 fix; without it, the stable puller copy on the VPS never updates and code-change deploys that tripped over deploy.sh's prior EACCES couldn't ship the new puller."
+            echo "  see: https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md#n17"
+            exit 1
+          fi
+          if ! grep -qE 'exit \$deploy_status' scripts/pull-deploy.sh; then
+            echo "::error file=scripts/pull-deploy.sh::B8.3 (AP-8) guard removed — pull-deploy.sh no longer propagates deploy.sh's exit code via 'exit \$deploy_status'"
+            echo "  rationale: without this, a deploy failure is treated as success and the next sweep marks the backlog row [x] when prod is still on the old code."
+            exit 1
+          fi
+          echo "B8.3 guard verified: scripts/pull-deploy.sh sets -euo pipefail + self-installs via install -m 755 + propagates deploy exit code."
