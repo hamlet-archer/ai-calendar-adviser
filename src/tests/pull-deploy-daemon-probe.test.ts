@@ -158,3 +158,176 @@ esac`,
     expect(result.stderr).toContain('substate=unknown');
   });
 });
+
+describe('pull-deploy.sh — N17 early self-install', () => {
+  let stubsDir: string;
+  let repoDir: string;
+
+  beforeEach(() => {
+    repoDir = makeRepoDir();
+  });
+
+  afterEach(() => {
+    if (stubsDir) rmSync(stubsDir, { recursive: true, force: true });
+    if (repoDir) rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  // The script only self-installs when `realpath "$0" == STABLE_PATH`.
+  // For the test we run via a temp symlink whose realpath matches the
+  // configured STABLE_PATH so the self-install branch is exercised.
+  function runViaStablePath(stubs: Record<string, string>): {
+    result: RunResult;
+    stablePath: string;
+  } {
+    stubsDir = makeStubsDir(stubs);
+    const stablePath = join(stubsDir, 'stable-pull-deploy.sh');
+    // Copy the real script into stable-pull-deploy.sh so its realpath
+    // == STABLE_PATH inside the test, and the self-install branch fires.
+    const r = spawnSync('cp', [SCRIPT, stablePath], { encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    chmodSync(stablePath, 0o755);
+    const path = `${stubsDir}:/usr/bin:/bin`;
+    const out = spawnSync('bash', [stablePath], {
+      env: {
+        ...process.env,
+        PATH: path,
+        REPO_DIR: repoDir,
+        DEPLOY_SCRIPT: join(stubsDir, 'deploy.sh'),
+        STABLE_PATH: stablePath,
+        DAEMON_UNIT: 'fake-daemon.service',
+        SYSTEMCTL_BIN: 'systemctl',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    return {
+      result: {
+        status: out.status ?? -1,
+        stdout: out.stdout ?? '',
+        stderr: out.stderr ?? '',
+      },
+      stablePath,
+    };
+  }
+
+  // Helper: write a sentinel file the git stub will `cat` when invoked
+  // as `git show origin/$BRANCH:scripts/pull-deploy.sh`. Returns the
+  // path so the test can assert on the file's content separately.
+  function writeSentinelFile(dir: string, content: string): string {
+    const p = join(dir, 'fake-origin-pull-deploy.sh');
+    writeFileSync(p, content, 'utf8');
+    return p;
+  }
+
+  it('self-installs the new pull-deploy.sh BEFORE deploy.sh runs, even when deploy.sh fails', () => {
+    // git rev-parse: returns LOCAL on first call, REMOTE on second.
+    // git show origin/main:scripts/pull-deploy.sh: cats the sentinel file.
+    // deploy.sh: exits 1 (simulates the npm EACCES that's kept the
+    //   daemon down since 2026-05-13).
+    stubsDir = makeStubsDir({
+      git: `case "$1" in
+  rev-parse)
+    STATE="$(dirname "$0")/.git-rev-parse-count"
+    if [[ ! -f "$STATE" ]]; then
+      echo aaaaaaaaaaaaaaaa
+      echo 1 > "$STATE"
+    else
+      echo bbbbbbbbbbbbbbbb
+    fi
+    ;;
+  show)
+    cat "$(dirname "$0")/fake-origin-pull-deploy.sh"
+    ;;
+  *)
+    exit 0
+    ;;
+esac`,
+      systemctl: 'if [[ "$1" == "is-active" ]]; then exit 0; fi',
+      logger: 'exit 0',
+      'deploy.sh': 'echo "deploy ran (simulated failure)"; exit 1',
+    });
+    writeSentinelFile(stubsDir, '#!/usr/bin/env bash\n# N17-SENTINEL-NEW-PULLER\n');
+    const stablePath = join(stubsDir, 'stable-pull-deploy.sh');
+    const cp = spawnSync('cp', [SCRIPT, stablePath], { encoding: 'utf8' });
+    expect(cp.status).toBe(0);
+    chmodSync(stablePath, 0o755);
+    const path = `${stubsDir}:/usr/bin:/bin`;
+    const out = spawnSync('bash', [stablePath], {
+      env: {
+        ...process.env,
+        PATH: path,
+        REPO_DIR: repoDir,
+        DEPLOY_SCRIPT: join(stubsDir, 'deploy.sh'),
+        STABLE_PATH: stablePath,
+        DAEMON_UNIT: 'fake-daemon.service',
+        SYSTEMCTL_BIN: 'systemctl',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    expect(out.stdout ?? '').toMatch(/self-installed updated pull-deploy\.sh/);
+    expect(out.stdout ?? '').toContain('deploy ran (simulated failure)');
+    expect(out.status).not.toBe(0);
+    // Stable file now contains the sentinel — proof the install actually wrote.
+    const stableContents = spawnSync('cat', [stablePath], { encoding: 'utf8' }).stdout;
+    expect(stableContents).toContain('N17-SENTINEL-NEW-PULLER');
+  });
+
+  it('does not self-install on no-op path (LOCAL == REMOTE)', () => {
+    stubsDir = makeStubsDir({
+      git: `case "$1" in
+  rev-parse) echo deadbeefdeadbeef ;;
+  show) cat "$(dirname "$0")/fake-origin-pull-deploy.sh" ;;
+  *) exit 0 ;;
+esac`,
+      systemctl: 'if [[ "$1" == "is-active" ]]; then exit 0; fi',
+      logger: 'exit 0',
+    });
+    writeSentinelFile(stubsDir, '#!/usr/bin/env bash\n# WRONG-SHOULD-NOT-INSTALL\n');
+    const stablePath = join(stubsDir, 'stable-pull-deploy.sh');
+    const cp = spawnSync('cp', [SCRIPT, stablePath], { encoding: 'utf8' });
+    expect(cp.status).toBe(0);
+    chmodSync(stablePath, 0o755);
+    const out = spawnSync('bash', [stablePath], {
+      env: {
+        ...process.env,
+        PATH: `${stubsDir}:/usr/bin:/bin`,
+        REPO_DIR: repoDir,
+        DEPLOY_SCRIPT: join(stubsDir, 'deploy.sh'),
+        STABLE_PATH: stablePath,
+        DAEMON_UNIT: 'fake-daemon.service',
+        SYSTEMCTL_BIN: 'systemctl',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    expect(out.status).toBe(0);
+    const stableContents = spawnSync('cat', [stablePath], { encoding: 'utf8' }).stdout;
+    expect(stableContents).not.toContain('WRONG-SHOULD-NOT-INSTALL');
+  });
+
+  it('propagates deploy.sh non-zero exit so systemd surfaces the failure', () => {
+    // Make sure a deploy-side failure isn't swallowed by `set -e` + the
+    // probe_daemon || true at the end. The puller's exit status feeds
+    // the systemd Result= the §2.6.1 verifier reads.
+    const r = runViaStablePath({
+      git: `case "$1" in
+  rev-parse)
+    STATE="$(dirname "$0")/.git-rev-parse-count"
+    if [[ ! -f "$STATE" ]]; then
+      echo aaaaaaaaaaaaaaaa
+      echo 1 > "$STATE"
+    else
+      echo bbbbbbbbbbbbbbbb
+    fi
+    ;;
+  show) exit 0 ;;
+  *) exit 0 ;;
+esac`,
+      systemctl: 'if [[ "$1" == "is-active" ]]; then exit 0; fi',
+      logger: 'exit 0',
+      'deploy.sh': 'echo failing; exit 42',
+    });
+    expect(r.result.status).toBe(42);
+  });
+});
