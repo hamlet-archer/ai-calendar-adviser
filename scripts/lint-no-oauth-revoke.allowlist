@@ -1,0 +1,12 @@
+# N18 allowlist — files in this repo that legitimately reference the
+# literal `oauth2.googleapis.com/revoke`. Path-prefix match; one entry
+# per line; `#` for comments.
+#
+# See: hamlet-archer/ai-ops-meta — docs/architecture.md §10
+#      hamlet-archer/ai-ops-meta — architect-backlog.md §N18
+
+# The workflow file itself references the literal as its grep target.
+.github/workflows/no-oauth-revoke.yml
+
+# This allowlist file documents the literal as commentary.
+scripts/lint-no-oauth-revoke.allowlist
