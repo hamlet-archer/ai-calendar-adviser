@@ -18,11 +18,12 @@
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { CalendarCache } from './cache.js';
+
 import { BootCheckError, renderDiagnostic, runBootCheck } from './boot-check.js';
+import { CalendarCache } from './cache.js';
 import { buildContractValidator } from './contracts.js';
+import { type RunningRpcServer, startRpcServer } from './rpc-server.js';
 import { renderSyncReport, runSyncCycle } from './sync-runner.js';
-import { startRpcServer, type RunningRpcServer } from './rpc-server.js';
 
 const DEFAULT_DB_PATH = '/var/lib/ai-calendar-adviser/calendar.db';
 // systemd RuntimeDirectory=ai-calendar-adviser creates /run/ai-calendar-adviser/.

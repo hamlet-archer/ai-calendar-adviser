@@ -20,11 +20,7 @@
  * call time.
  */
 
-export const CALENDAR_SLOTS = [
-  'mkkk',
-  'mkkk-others',
-  'staff',
-] as const;
+export const CALENDAR_SLOTS = ['mkkk', 'mkkk-others', 'staff'] as const;
 
 export type CalendarSlot = (typeof CALENDAR_SLOTS)[number];
 

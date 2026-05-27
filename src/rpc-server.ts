@@ -28,11 +28,12 @@
 
 import { chmodSync, existsSync, unlinkSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
-import type { CalendarSlot } from './calendar-config.js';
+
 import type { CalendarCache } from './cache.js';
+import type { CalendarSlot } from './calendar-config.js';
 import type { ContractValidator } from './contracts.js';
-import { handleCalendarQuery, type HandlerError } from './handlers/calendar-query.js';
 import { handleFindFreeSlot } from './handlers/calendar-find-free-slot.js';
+import { handleCalendarQuery, type HandlerError } from './handlers/calendar-query.js';
 
 export interface RpcServerDeps {
   readonly socketPath: string;
@@ -49,9 +50,12 @@ const MAX_LINE_BYTES = 1024 * 1024;
 
 function defaultLogger(): NonNullable<RpcServerDeps['logger']> {
   return {
-    info: (o) => console.log(JSON.stringify({ level: 'info', service: 'ai-calendar-adviser', ...o })),
-    warn: (o) => console.warn(JSON.stringify({ level: 'warn', service: 'ai-calendar-adviser', ...o })),
-    error: (o) => console.error(JSON.stringify({ level: 'error', service: 'ai-calendar-adviser', ...o })),
+    info: (o) =>
+      console.log(JSON.stringify({ level: 'info', service: 'ai-calendar-adviser', ...o })),
+    warn: (o) =>
+      console.warn(JSON.stringify({ level: 'warn', service: 'ai-calendar-adviser', ...o })),
+    error: (o) =>
+      console.error(JSON.stringify({ level: 'error', service: 'ai-calendar-adviser', ...o })),
   };
 }
 
@@ -77,7 +81,11 @@ export function createRpcServer(deps: RpcServerDeps): Server {
         logger.warn({ phase: 'rpc', msg: 'oversize_line_dropped' });
         try {
           socket.end(
-            JSON.stringify({ ok: false, code: 'bad_query', message: 'request line exceeds 1 MiB' }) + '\n',
+            JSON.stringify({
+              ok: false,
+              code: 'bad_query',
+              message: 'request line exceeds 1 MiB',
+            }) + '\n',
           );
         } catch {
           // Best-effort.

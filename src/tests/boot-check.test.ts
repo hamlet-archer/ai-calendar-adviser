@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { BootCheckError, runBootCheck } from '../boot-check.js';
 import { GoogleCalendarUserOauthAdapter } from '../google-calendar-user-oauth-adapter.js';
 
@@ -16,11 +17,7 @@ function adapterFromMocks(opts: {
 }): GoogleCalendarUserOauthAdapter {
   const listCalendars =
     opts.listCalendars ??
-    (async () => [
-      { id: 'cal-mkkk' },
-      { id: 'cal-mkkk-others' },
-      { id: 'cal-staff' },
-    ]);
+    (async () => [{ id: 'cal-mkkk' }, { id: 'cal-mkkk-others' }, { id: 'cal-staff' }]);
   const listEvents = opts.listEvents ?? (async () => undefined);
   // Cast — we don't construct a real calendar_v3.Calendar; we hand the
   // adapter exactly the surface the boot-check uses.
@@ -30,11 +27,11 @@ function adapterFromMocks(opts: {
     listCalendars: () => Promise<unknown>;
     listEvents: (opts: { calendarId: string }) => Promise<unknown>;
   };
-  adapter.listCalendars = listCalendars as unknown as () => Promise<unknown>;
-  adapter.listEvents = (async (o: { calendarId: string }) => {
+  adapter.listCalendars = listCalendars;
+  adapter.listEvents = async (o: { calendarId: string }) => {
     await listEvents(o.calendarId);
     return { events: [], nextSyncToken: null };
-  }) as unknown as (opts: { calendarId: string }) => Promise<unknown>;
+  };
   return adapter;
 }
 

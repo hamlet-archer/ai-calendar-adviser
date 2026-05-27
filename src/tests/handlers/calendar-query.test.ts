@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { CalendarCache } from '../../cache.js';
 import type { ContractEnvelope } from '../../contracts.js';
 import { handleCalendarQuery } from '../../handlers/calendar-query.js';
@@ -14,7 +16,13 @@ const CAL_IDS = {
   staff: 'staff@group.calendar.google.com',
 } as const;
 
-function seedEvent(cache: CalendarCache, id: string, calendarId: string, start: string, end: string) {
+function seedEvent(
+  cache: CalendarCache,
+  id: string,
+  calendarId: string,
+  start: string,
+  end: string,
+) {
   cache.upsertEvent({
     id,
     calendarId,
@@ -135,13 +143,7 @@ describe('handleCalendarQuery', () => {
 
   it('reports truncated when results exceed limit', () => {
     for (let i = 0; i < 5; i += 1) {
-      seedEvent(
-        cache,
-        `e${i}`,
-        CAL_IDS.mkkk,
-        `2026-05-12T1${i}:00:00Z`,
-        `2026-05-12T1${i}:30:00Z`,
-      );
+      seedEvent(cache, `e${i}`, CAL_IDS.mkkk, `2026-05-12T1${i}:00:00Z`, `2026-05-12T1${i}:30:00Z`);
     }
     const res = handleCalendarQuery(queryEnvelope({ person: 'mkkk', limit: 2 }), {
       cache,

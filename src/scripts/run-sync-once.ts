@@ -12,8 +12,8 @@
  *       failure" signal without blocking the cadence.
  */
 
-import { CalendarCache } from '../cache.js';
 import { BootCheckError, renderDiagnostic, runBootCheck } from '../boot-check.js';
+import { CalendarCache } from '../cache.js';
 import { renderSyncReport, runSyncCycle } from '../sync-runner.js';
 
 const DEFAULT_DB_PATH = process.env.CALENDAR_DB_PATH ?? '/var/lib/ai-calendar-adviser/calendar.db';
@@ -26,11 +26,10 @@ async function main(): Promise<number> {
     adapter = checked.adapter;
   } catch (err) {
     if (err instanceof BootCheckError) {
-      // eslint-disable-next-line no-console
       console.error(renderDiagnostic(err.diagnostic));
       return 1;
     }
-    // eslint-disable-next-line no-console
+
     console.error(
       JSON.stringify({
         level: 'fatal',
@@ -46,7 +45,7 @@ async function main(): Promise<number> {
   const cache = new CalendarCache(DEFAULT_DB_PATH);
   try {
     const report = await runSyncCycle({ adapter, cache, calendarIds });
-    // eslint-disable-next-line no-console
+
     console.log(renderSyncReport(report));
     const failed = report.results.some((r) => r.status === 'error');
     return failed ? 2 : 0;
@@ -58,7 +57,6 @@ async function main(): Promise<number> {
 main().then(
   (code) => process.exit(code),
   (err: unknown) => {
-    // eslint-disable-next-line no-console
     console.error(
       JSON.stringify({
         level: 'fatal',

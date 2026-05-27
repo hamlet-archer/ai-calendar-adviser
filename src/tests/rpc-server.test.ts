@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { CalendarCache } from '../cache.js';
 import { buildContractValidator } from '../contracts.js';
-import { startRpcServer, type RunningRpcServer } from '../rpc-server.js';
+import { type RunningRpcServer, startRpcServer } from '../rpc-server.js';
 
 const CONTRACTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../contracts');
 

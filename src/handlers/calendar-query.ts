@@ -12,8 +12,8 @@
  * — the RPC server serialises both forms back to the caller.
  */
 
-import type { CalendarSlot } from '../calendar-config.js';
 import type { CalendarCache } from '../cache.js';
+import type { CalendarSlot } from '../calendar-config.js';
 import type { ContractEnvelope } from '../contracts.js';
 import type { Person } from '../person-calendar-map.js';
 import { resolveCalendarIds, slotsForPerson } from '../person-calendar-map.js';
@@ -102,10 +102,7 @@ export function handleCalendarQuery(
   if (personRaw === 'kelvin') {
     return unavailableEnvelope(envelope.trace_id);
   }
-  if (
-    explicitCalendars &&
-    explicitCalendars.some((s) => KELVIN_ONLY_CALENDAR_SLOTS.has(s))
-  ) {
+  if (explicitCalendars && explicitCalendars.some((s) => KELVIN_ONLY_CALENDAR_SLOTS.has(s))) {
     return unavailableEnvelope(envelope.trace_id);
   }
 

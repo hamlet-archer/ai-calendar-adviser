@@ -22,8 +22,8 @@
  * Read-only. Does NOT book or hold the returned slots.
  */
 
-import type { CalendarSlot } from '../calendar-config.js';
 import type { CalendarCache, EventRow } from '../cache.js';
+import type { CalendarSlot } from '../calendar-config.js';
 import type { ContractEnvelope } from '../contracts.js';
 import type { Person } from '../person-calendar-map.js';
 import { resolveCalendarIds, slotsForPerson } from '../person-calendar-map.js';
@@ -128,9 +128,7 @@ interface WorkingHours {
   readonly days: readonly number[];
 }
 
-function parseWorkingHours(
-  envelope: ContractEnvelope,
-): WorkingHours {
+function parseWorkingHours(envelope: ContractEnvelope): WorkingHours {
   const wh = envelope.working_hours as
     | { start: string; end: string; days?: readonly number[] }
     | undefined;
@@ -201,10 +199,7 @@ function workingHourBands(
   return bands;
 }
 
-function subtractBusyFromBand(
-  band: Interval,
-  busy: readonly Interval[],
-): Interval[] {
+function subtractBusyFromBand(band: Interval, busy: readonly Interval[]): Interval[] {
   // Iterate busy intervals overlapping the band; the gaps are free.
   const free: Interval[] = [];
   let cursor = band.startMs;

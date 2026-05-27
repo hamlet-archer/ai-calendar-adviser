@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { CalendarCache } from '../../cache.js';
 import type { ContractEnvelope } from '../../contracts.js';
 import { handleFindFreeSlot } from '../../handlers/calendar-find-free-slot.js';
@@ -15,7 +17,13 @@ const CAL_IDS = {
   staff: 'staff@group.calendar.google.com',
 } as const;
 
-function seedEvent(cache: CalendarCache, id: string, calendarId: string, start: string, end: string) {
+function seedEvent(
+  cache: CalendarCache,
+  id: string,
+  calendarId: string,
+  start: string,
+  end: string,
+) {
   cache.upsertEvent({
     id,
     calendarId,
@@ -123,10 +131,10 @@ describe('handleFindFreeSlot', () => {
   it('intersects multiple participants — busy on either side blocks the slot', () => {
     seedEvent(cache, 'm', CAL_IDS.mkkk, '2026-05-12T09:00:00Z', '2026-05-12T10:00:00Z');
     seedEvent(cache, 's', CAL_IDS.staff, '2026-05-12T10:00:00Z', '2026-05-12T11:00:00Z');
-    const res = handleFindFreeSlot(
-      ffsEnvelope({ participants: ['mkkk', 'sally'] }),
-      { cache, calendarIds: CAL_IDS },
-    );
+    const res = handleFindFreeSlot(ffsEnvelope({ participants: ['mkkk', 'sally'] }), {
+      cache,
+      calendarIds: CAL_IDS,
+    });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     if ('status' in res) throw new Error('expected slots, got unavailable');
@@ -157,9 +165,7 @@ describe('handleFindFreeSlot', () => {
     expect(res.slots).toHaveLength(3);
     // Earliest-first.
     for (let i = 1; i < res.slots.length; i += 1) {
-      expect(Date.parse(res.slots[i].start)).toBeGreaterThan(
-        Date.parse(res.slots[i - 1].start),
-      );
+      expect(Date.parse(res.slots[i].start)).toBeGreaterThan(Date.parse(res.slots[i - 1].start));
     }
   });
 
@@ -190,10 +196,10 @@ describe('handleFindFreeSlot', () => {
 
   it('treats ai-doer as always-free (contributes no busy time)', () => {
     seedEvent(cache, 'm', CAL_IDS.mkkk, '2026-05-12T09:00:00Z', '2026-05-12T17:00:00Z');
-    const res = handleFindFreeSlot(
-      ffsEnvelope({ participants: ['ai-doer'] }),
-      { cache, calendarIds: CAL_IDS },
-    );
+    const res = handleFindFreeSlot(ffsEnvelope({ participants: ['ai-doer'] }), {
+      cache,
+      calendarIds: CAL_IDS,
+    });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     if ('status' in res) throw new Error('expected slots, got unavailable');

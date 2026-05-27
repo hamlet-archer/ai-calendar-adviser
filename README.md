@@ -10,17 +10,18 @@ Design: [`docs/architecture.md` §6.8](https://github.com/hamlet-archer/ai-ops-m
 
 ## What it owns
 
-| Domain | Source |
-|---|---|
-| `calendar.primary` | Google Calendar — Kelvin's primary |
-| `calendar.mkkk` | Google Calendar — household shared |
-| `calendar.others` | Google Calendar — others |
+| Domain                 | Source                               |
+| ---------------------- | ------------------------------------ |
+| `calendar.primary`     | Google Calendar — Kelvin's primary   |
+| `calendar.mkkk`        | Google Calendar — household shared   |
+| `calendar.others`      | Google Calendar — others             |
 | `calendar.mkkk-others` | Google Calendar — household + others |
-| `staff.schedules` | Composed view across calendars |
+| `staff.schedules`      | Composed view across calendars       |
 
 ## Contracts
 
 Accepts:
+
 - [`calendar.query.v1`](https://github.com/hamlet-archer/ai-ops-meta/blob/main/contracts/calendar.query.v1.json)
 - [`calendar.find_free_slot.v1`](https://github.com/hamlet-archer/ai-ops-meta/blob/main/contracts/calendar.find_free_slot.v1.json)
 
@@ -37,6 +38,7 @@ Accepts:
 ## Boot self-check (AP-3 + AP-4)
 
 On startup, before binding any RPC, the agent must:
+
 1. Validate Google OAuth token against `ai@liao.info`
 2. Enumerate the 5 expected calendarIds via `calendarList.list` — fail loud on missing
 3. Round-trip one `calendar.list` against each calendar — fail loud on 403/404
