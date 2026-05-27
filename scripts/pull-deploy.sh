@@ -108,6 +108,29 @@ if [[ "$SELF_REAL" == "$STABLE_REAL" ]]; then
   rm -f "$TMP_PULLER"
 fi
 
+# Normalize tree ownership BEFORE deploy.sh runs `npm ci`. The puller
+# runs as `ubuntu` (per `User=ubuntu` in the unit), and so does
+# deploy.sh. But recovery operations during an outage (e.g. `sudo npm
+# install` while debugging an OAuth cascade) sometimes leave root-owned
+# files inside /opt/ai-calendar-adviser/node_modules/ or the deploy-
+# side npm-cache. When that happens, `npm ci`'s first move — unlinking
+# the old tree to rebuild from package-lock.json — fails with
+# "EACCES: permission denied, unlink '.../node_modules/...'", deploy.sh's
+# `set -euo pipefail` exits BEFORE the `systemctl start` line, and the
+# service stays stopped indefinitely. 27-min outage on 2026-05-27 10:33Z
+# (after N18.d merged); incident
+# `2026-05-27-ai-calendar-adviser-deploy-npm-eacces-27min-outage.md`.
+# `sudo -n` is non-interactive (ubuntu has NOPASSWD ALL on this host;
+# the existing deploy.sh already relies on sudo for `systemctl stop`).
+# Silent no-op when ownership is already clean (the common case).
+sudo -n /usr/bin/chown -R ubuntu:ubuntu \
+  "$REPO_DIR" \
+  /opt/ai-calendar-adviser-deploy/npm-cache \
+  /opt/ai-calendar-adviser-deploy/npm-logs \
+  /opt/ai-calendar-adviser-deploy/npm-prefix \
+  /opt/ai-calendar-adviser-deploy/.npm \
+  2>/dev/null || true
+
 # deploy.sh reads ${REMOTE} via its own git fetch + reset; we just hand off.
 # Use `||` to capture deploy failures so the post-deploy probe still runs
 # and we exit with the underlying status. Without this, `set -e` would
