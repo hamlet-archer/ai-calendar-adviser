@@ -1,12 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { calendar_v3 } from 'googleapis';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { CalendarCache } from '../cache.js';
+import type { CalendarSlot } from '../calendar-config.js';
 import { GoogleCalendarUserOauthAdapter } from '../google-calendar-user-oauth-adapter.js';
 import { CALENDAR_SYNC_RATE_PER_S, runSyncCycle } from '../sync-runner.js';
-import type { CalendarSlot } from '../calendar-config.js';
 
 // G6.5c: kelvin-only slots (primary, others) deprecated; calendar set
 // trimmed to the three non-kelvin shared calendars.
@@ -39,9 +41,7 @@ interface MockListEventsCall {
 }
 
 function makeAdapter(opts: {
-  responseFor?: (
-    calendarId: string,
-  ) => Promise<{
+  responseFor?: (calendarId: string) => Promise<{
     events: ReadonlyArray<calendar_v3.Schema$Event>;
     nextSyncToken: string | null;
   }>;
@@ -56,12 +56,10 @@ function makeAdapter(opts: {
       timeMin?: string;
     }) => Promise<unknown>;
   };
-  adapter.listEvents = (async (o) => {
+  adapter.listEvents = async (o) => {
     opts.capturedCalls?.push(o);
-    return (
-      (await opts.responseFor?.(o.calendarId)) ?? { events: [], nextSyncToken: null }
-    );
-  }) as unknown as (o: { calendarId: string }) => Promise<unknown>;
+    return (await opts.responseFor?.(o.calendarId)) ?? { events: [], nextSyncToken: null };
+  };
   return adapter;
 }
 
@@ -125,11 +123,7 @@ describe('runSyncCycle — happy path', () => {
   it('drops events with no id, no start, or no end', async () => {
     const adapter = makeAdapter({
       responseFor: async () => ({
-        events: [
-          evt('keeper'),
-          { id: undefined, summary: 'no-id' } as calendar_v3.Schema$Event,
-          { id: 'no-bounds' } as calendar_v3.Schema$Event,
-        ],
+        events: [evt('keeper'), { id: undefined, summary: 'no-id' }, { id: 'no-bounds' }],
         nextSyncToken: null,
       }),
     });

@@ -36,8 +36,9 @@
  */
 
 import { readFileSync } from 'node:fs';
+
 import { OAuth2Client } from 'google-auth-library';
-import { google, type calendar_v3 } from 'googleapis';
+import { type calendar_v3, google } from 'googleapis';
 
 export const CALENDAR_READONLY_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 
@@ -128,9 +129,7 @@ export class GoogleCalendarUserOauthAdapter {
 
     const subject = (deps.subject ?? process.env.OAUTH_SUBJECT ?? OAUTH_SUBJECT_DEFAULT).trim();
     if (!subject) {
-      throw new Error(
-        'calendar_user_oauth_subject_unset: pass subject or set OAUTH_SUBJECT',
-      );
+      throw new Error('calendar_user_oauth_subject_unset: pass subject or set OAUTH_SUBJECT');
     }
     if ((FORBIDDEN_SUBJECTS as readonly string[]).includes(subject)) {
       throw new Error(

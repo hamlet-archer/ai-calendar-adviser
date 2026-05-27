@@ -9,15 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: npm ci || npm install
-      - run: npm run lint
   test:
     runs-on: ubuntu-latest
     steps:
@@ -25,5 +16,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
       - run: npm ci || npm install
+      - run: npm run typecheck
       - run: npm test
+      - run: npm run build
+
+  prettier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci || npm install
+      - name: Prettier check (blocking — mechanical drift only)
+        run: npx prettier --check .
+
+  eslint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci || npm install
+      - name: ESLint (non-blocking — surface warnings only until P5.3.b)
+        # P5.3.a ships warnings-allowed; the `|| echo` keeps the job green so
+        # the PR check is mergeable. P5.3.b will drop the `|| echo` AND add
+        # `--max-warnings=0` to flip this to blocking.
+        run: npx eslint . || echo "::warning::ESLint reported issues — non-blocking until P5.3.b"

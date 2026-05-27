@@ -97,7 +97,7 @@ export async function runBootCheck(deps: BootCheckDeps = {}): Promise<{
   // burn a Google quota call.
   let calendarIds: Record<CalendarSlot, string>;
   try {
-    calendarIds = loadCalendarIds(env) as Record<CalendarSlot, string>;
+    calendarIds = loadCalendarIds(env);
   } catch (err) {
     if (err instanceof CalendarConfigError) {
       throw new BootCheckError({

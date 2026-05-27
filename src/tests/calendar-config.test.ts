@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import {
   CALENDAR_SLOTS,
   CalendarConfigError,
@@ -40,7 +41,10 @@ describe('loadCalendarIds', () => {
   });
 
   it('trims surrounding whitespace', () => {
-    const map = loadCalendarIds({ ...fullEnv, CALENDAR_ID_MKKK: '  mkkk@group.calendar.google.com  ' });
+    const map = loadCalendarIds({
+      ...fullEnv,
+      CALENDAR_ID_MKKK: '  mkkk@group.calendar.google.com  ',
+    });
     expect(map.mkkk).toBe('mkkk@group.calendar.google.com');
   });
 
@@ -52,7 +56,7 @@ describe('loadCalendarIds', () => {
       caught = err as CalendarConfigError;
     }
     expect(caught).toBeInstanceOf(CalendarConfigError);
-    expect(caught?.missingSlots.sort()).toEqual(['mkkk-others', 'staff']);
+    expect([...(caught?.missingSlots ?? [])].sort()).toEqual(['mkkk-others', 'staff']);
     expect(caught?.message).toMatch(/CALENDAR_ID_MKKK_OTHERS/);
     expect(caught?.message).toMatch(/CALENDAR_ID_STAFF/);
   });

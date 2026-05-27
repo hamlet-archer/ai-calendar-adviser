@@ -15,14 +15,16 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { calendar_v3 } from 'googleapis';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
   CALENDAR_READONLY_SCOPE,
+  exchangeRefreshToken,
   FORBIDDEN_SUBJECTS,
   GoogleCalendarUserOauthAdapter,
   OAUTH_SUBJECT_DEFAULT,
-  exchangeRefreshToken,
   type UserOauthTokenFile,
 } from '../google-calendar-user-oauth-adapter.js';
 
@@ -120,9 +122,9 @@ describe('GoogleCalendarUserOauthAdapter.fromTokenFile — subject discipline', 
     const prev = process.env.OAUTH_SUBJECT;
     process.env.OAUTH_SUBJECT = 'kelvin@liao.info';
     try {
-      expect(() =>
-        GoogleCalendarUserOauthAdapter.fromTokenFile({ tokenFilePath: path }),
-      ).toThrow(/calendar_user_oauth_subject_forbidden/);
+      expect(() => GoogleCalendarUserOauthAdapter.fromTokenFile({ tokenFilePath: path })).toThrow(
+        /calendar_user_oauth_subject_forbidden/,
+      );
     } finally {
       if (prev === undefined) delete process.env.OAUTH_SUBJECT;
       else process.env.OAUTH_SUBJECT = prev;
@@ -325,7 +327,7 @@ describe('exchangeRefreshToken — OAuth2 refresh path against a mocked token en
     expect(result.expires_in).toBe(3600);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    const [url, init] = fetchSpy.mock.calls[0]!;
+    const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe('https://oauth2.googleapis.com/token');
     expect((init as RequestInit).method).toBe('POST');
     const body = (init as RequestInit).body as URLSearchParams;

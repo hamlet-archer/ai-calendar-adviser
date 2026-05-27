@@ -46,11 +46,7 @@ function makeRepoDir(): string {
   return d;
 }
 
-function run(opts: {
-  stubsDir: string;
-  repoDir: string;
-  env?: Record<string, string>;
-}): RunResult {
+function run(opts: { stubsDir: string; repoDir: string; env?: Record<string, string> }): RunResult {
   const path = `${opts.stubsDir}:/usr/bin:/bin`;
   const r = spawnSync('bash', [SCRIPT], {
     env: {
