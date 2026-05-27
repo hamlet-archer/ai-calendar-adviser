@@ -12,6 +12,10 @@
  *     non-2xx error surface
  */
 
+// Stub `calendar_v3.Calendar` methods mirror the SDK's async interface
+// without awaiting anything internally.
+/* eslint-disable @typescript-eslint/require-await */
+
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

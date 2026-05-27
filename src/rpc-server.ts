@@ -157,7 +157,7 @@ function handleLine(
       response = {
         ok: false,
         code: 'bad_query',
-        message: `unsupported contract_id: ${envelope.contract_id}`,
+        message: `unsupported contract_id: ${String(envelope.contract_id)}`,
         trace_id: envelope.trace_id,
       } satisfies HandlerError & { trace_id: string };
     }

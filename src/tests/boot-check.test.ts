@@ -1,3 +1,8 @@
+// Stub adapters intentionally mirror the production async surface, so most
+// mock methods declare `async` to match the typed interface without ever
+// `await`ing anything internally.
+/* eslint-disable @typescript-eslint/require-await */
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { BootCheckError, runBootCheck } from '../boot-check.js';
