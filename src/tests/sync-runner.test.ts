@@ -1,3 +1,8 @@
+// Mock adapter methods mirror the production async surface so their
+// signatures line up with the real `GoogleCalendarUserOauthAdapter` type
+// without awaiting anything internally.
+/* eslint-disable @typescript-eslint/require-await */
+
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

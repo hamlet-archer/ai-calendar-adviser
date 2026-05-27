@@ -288,6 +288,6 @@ function loadAndValidateTokenFile(path: string): UserOauthTokenFile {
     client_secret: parsed.client_secret,
     refresh_token: parsed.refresh_token,
     token_uri: parsed.token_uri,
-    allowed_scopes: Object.freeze([...parsed.allowed_scopes]),
+    allowed_scopes: Object.freeze([...(parsed.allowed_scopes as readonly string[])]),
   };
 }

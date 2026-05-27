@@ -44,7 +44,7 @@ function roundTrip(socketPath: string, payload: object): Promise<unknown> {
         try {
           resolveRT(JSON.parse(line));
         } catch (err) {
-          reject(err);
+          reject(err instanceof Error ? err : new Error(String(err)));
         }
       }
     });
@@ -184,7 +184,7 @@ describe('rpc-server integration', () => {
           try {
             resolveRT(JSON.parse(buffer.slice(0, nl)));
           } catch (err) {
-            reject(err);
+            reject(err instanceof Error ? err : new Error(String(err)));
           }
         }
       });
