@@ -7,3 +7,7 @@ dist/
 coverage/
 .vitest-cache/
 /var/
+
+# Cross-family auditor output (codex-audit) — local per machine
+.claude/audits/*
+!.claude/audits/README.md
