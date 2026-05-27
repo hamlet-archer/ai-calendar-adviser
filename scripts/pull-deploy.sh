@@ -34,6 +34,29 @@ DAEMON_UNIT="${DAEMON_UNIT:-ai-calendar-adviser.service}"
 # `systemctl` resolves to on PATH.
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 
+# R4.b — source the deploy-tick invariant helpers (template vendored from
+# ai-ops-meta/deploy/templates/deploy-tick-invariant.sh per architect-
+# backlog §R4). Helpers carry the "daemon-must-be-active after every
+# deploy tick" invariant; wired below at the existing $DEPLOY_SCRIPT
+# invocation site. UNIT is the long-running RPC daemon; reuse DAEMON_UNIT
+# so the smoke-test override path stays single-source.
+#
+# Sourced by absolute path under $REPO_DIR rather than `dirname $0` because
+# the puller runs from STABLE_PATH (outside the repo) — sibling lib/ would
+# not be reachable from there. After deploy.sh's git reset the lib lives
+# at $REPO_DIR/scripts/lib/. On a fresh repo where the lib hasn't landed
+# yet (or in test fixtures that don't stage it), fall back to no-op stubs
+# so the puller still runs.
+UNIT="$DAEMON_UNIT"
+INVARIANT_LIB="${REPO_DIR}/scripts/lib/deploy-tick-invariant.sh"
+if [[ -f "$INVARIANT_LIB" ]]; then
+  # shellcheck source=scripts/lib/deploy-tick-invariant.sh
+  source "$INVARIANT_LIB"
+else
+  deploy_tick_invariant__pre_state() { echo "unknown"; }
+  deploy_tick_invariant__post() { return 0; }
+fi
+
 # systemd ProtectHome=read-only hides ~/.ssh — match the deploy.sh
 # pattern and point at the staged key + known_hosts under /etc.
 export GIT_SSH_COMMAND="ssh -i /etc/ai-calendar-adviser-deploy/ssh/key -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ai-calendar-adviser-deploy/ssh/known_hosts -o StrictHostKeyChecking=yes -o HostName=ssh.github.com -p 443"
@@ -135,8 +158,20 @@ sudo -n /usr/bin/chown -R ubuntu:ubuntu \
 # Use `||` to capture deploy failures so the post-deploy probe still runs
 # and we exit with the underlying status. Without this, `set -e` would
 # silently swallow the daemon-probe (= the only observability we have).
+#
+# R4.b — capture pre-deploy state BEFORE the deploy fires so the invariant
+# helper can tell "deploy killed an active unit" from "unit was already
+# dead going in" (the latter is somebody else's outage).
+pre_deploy_state=$(deploy_tick_invariant__pre_state)
 deploy_status=0
 "$DEPLOY_SCRIPT" || deploy_status=$?
+
+# R4.b — enforce the post-deploy invariant. If deploy.sh exited non-zero
+# AND the daemon was active going in AND the daemon is now dead, do one
+# `systemctl reset-failed` + `start` attempt. Any failure here is captured
+# in deploy_status so the puller tick propagates Result=failure to systemd
+# for stability-mode to escalate.
+deploy_tick_invariant__post "$deploy_status" "$pre_deploy_state" || deploy_status=$?
 
 # B8.10.3 — post-daemon-reload systemd-unit drift check. Mirrors the
 # B8.10.2 block in ai-comms-adviser/scripts/deploy.sh, but hooked in the
