@@ -44,18 +44,64 @@ SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 # Sourced by absolute path under $REPO_DIR rather than `dirname $0` because
 # the puller runs from STABLE_PATH (outside the repo) — sibling lib/ would
 # not be reachable from there. After deploy.sh's git reset the lib lives
-# at $REPO_DIR/scripts/lib/. On a fresh repo where the lib hasn't landed
-# yet (or in test fixtures that don't stage it), fall back to no-op stubs
-# so the puller still runs.
+# at $REPO_DIR/scripts/lib/.
+#
+# W6 — resilient source: the version-skew window. On the very tick that
+# ships R4.b the working-tree copy is still the PRE-R4.b checkout (deploy.sh
+# hasn't reset it yet — that runs AFTER this source), so $INVARIANT_LIB is
+# either absent or a stale version that lacks the helpers. The pre-W6 code
+# degraded to no-op stubs in exactly that case, which meant the recovery
+# could not fire on the tick that introduces it — and the audited finding
+# (W6 canonical; W7 e1fce182cbea + W8 6eb9b50ec9a8 are the same root cause)
+# was that the daemon could then stay dead indefinitely.
+#
+# Fix: source resiliently, mirroring the N17 self-install pattern used below
+# for pull-deploy.sh itself — prefer the working-tree copy, but if it's
+# absent fetch the same-version helper straight out of origin/$BRANCH via
+# `git show` into a temp file and source THAT. Only when even origin lacks
+# it (a truly fresh repo with no lib committed yet) do we fall back to no-op
+# stubs, so the puller never crashes. Sourcing must happen after `cd
+# "$REPO_DIR"` + `git fetch` so the `git show origin/$BRANCH:...` ref is both
+# valid and current; the actual source call is therefore deferred to
+# source_invariant_lib() invoked below, post-fetch.
 UNIT="$DAEMON_UNIT"
 INVARIANT_LIB="${REPO_DIR}/scripts/lib/deploy-tick-invariant.sh"
-if [[ -f "$INVARIANT_LIB" ]]; then
-  # shellcheck source=scripts/lib/deploy-tick-invariant.sh
-  source "$INVARIANT_LIB"
-else
+INVARIANT_REL="scripts/lib/deploy-tick-invariant.sh"
+
+# W6 — load the deploy-tick invariant helpers for THIS tick, regardless of
+# checkout state. Called after `git fetch` (below) so origin/$BRANCH is a
+# valid, up-to-date ref. Sets a shell-global so we only source once.
+_invariant_sourced=
+source_invariant_lib() {
+  [[ -n "$_invariant_sourced" ]] && return 0
+  if [[ -f "$INVARIANT_LIB" ]] && grep -q 'deploy_tick_invariant__post' "$INVARIANT_LIB" 2>/dev/null; then
+    # shellcheck source=scripts/lib/deploy-tick-invariant.sh
+    source "$INVARIANT_LIB"
+    _invariant_sourced=1
+    return 0
+  fi
+  # Working-tree copy absent or stale (pre-R4.b checkout on the introducing
+  # tick). Fetch the same-version helper from origin/$BRANCH — same trick the
+  # N17 self-install uses for the puller. `git show` reads straight out of
+  # the object store; no working-tree reset needed (deploy.sh does that).
+  local tmp_lib
+  tmp_lib="$(mktemp)"
+  if git show "origin/$BRANCH:$INVARIANT_REL" > "$tmp_lib" 2>/dev/null \
+     && grep -q 'deploy_tick_invariant__post' "$tmp_lib" 2>/dev/null; then
+    # shellcheck source=/dev/null
+    source "$tmp_lib"
+    rm -f "$tmp_lib"
+    _invariant_sourced=1
+    echo "W6: sourced deploy-tick-invariant.sh from origin/$BRANCH (working-tree copy absent/stale)"
+    return 0
+  fi
+  rm -f "$tmp_lib"
+  # Even origin lacks it — truly fresh repo (or a test fixture that stages
+  # neither). Final no-op-stub fallback so the puller still runs.
   deploy_tick_invariant__pre_state() { echo "unknown"; }
   deploy_tick_invariant__post() { return 0; }
-fi
+  _invariant_sourced=1
+}
 
 # systemd ProtectHome=read-only hides ~/.ssh — match the deploy.sh
 # pattern and point at the staged key + known_hosts under /etc.
@@ -95,14 +141,41 @@ probe_daemon() {
 cd "$REPO_DIR"
 
 git fetch --quiet origin "$BRANCH"
+
+# W6 — source the deploy-tick invariant helpers now, AFTER the fetch, so the
+# origin/$BRANCH fallback ref is valid and current even on the introducing
+# tick (the working-tree copy is still the pre-R4.b version at this point).
+source_invariant_lib
+
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse "origin/$BRANCH")
 
 if [[ "$LOCAL" == "$REMOTE" ]]; then
   # No deploy needed — still probe daemon liveness so the no-op path
   # doesn't mask a daemon outage (the original N15 failure mode).
-  probe_daemon || true   # probe failure is observability, not a deploy failure
-  exit 0
+  #
+  # W6 — recover on the no-deploy path too. This is the half of the bug
+  # that actually causes "stays dead indefinitely": after a failed deploy
+  # that stopped the daemon, every subsequent tick takes THIS LOCAL ==
+  # REMOTE fast path (deploy.sh already advanced the repo), so the
+  # post-deploy invariant below never runs again. The pre-W6 code only
+  # `probe_daemon || true`'d here — observability, no recovery — so the
+  # daemon stayed down until another code change happened to land.
+  #
+  # Fix: when the probe finds the daemon down, attempt the SAME one-shot
+  # reset-failed + start the post-deploy invariant performs. We reuse the
+  # invariant helper rather than duplicating its logic: pass deploy_status=1
+  # (so it doesn't short-circuit on the success no-op) and pre_state="active"
+  # (on the no-deploy path the daemon is expected to be up, so a down daemon
+  # IS our outage to fix — there's no "deploy killed it" vs. "already dead"
+  # ambiguity here, unlike the post-deploy path). A recovery failure is
+  # surfaced via exit status, consistent with the post-deploy `exit
+  # $deploy_status` pattern; a recovery success still exits 0.
+  noop_status=0
+  if ! probe_daemon; then
+    deploy_tick_invariant__post 1 "active" || noop_status=$?
+  fi
+  exit "$noop_status"
 fi
 
 echo "HEAD differs (${LOCAL:0:7} → ${REMOTE:0:7}); delegating to ${DEPLOY_SCRIPT}"
