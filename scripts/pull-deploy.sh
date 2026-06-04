@@ -92,7 +92,7 @@ source_invariant_lib() {
     source "$tmp_lib"
     rm -f "$tmp_lib"
     _invariant_sourced=1
-    echo "W6: sourced deploy-tick-invariant.sh from origin/$BRANCH (working-tree copy absent/stale)"
+    echo "W6: sourced deploy-tick-invariant.sh from origin/$BRANCH (working-tree copy absent/stale)" >&2
     return 0
   fi
   rm -f "$tmp_lib"

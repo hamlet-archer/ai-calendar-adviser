@@ -256,6 +256,82 @@ esac`,
     expect(tick2.status).toBe(0);
   });
 
+  it('W6 git-show fallback: working-tree lib ABSENT, real helper fetched from origin/$BRANCH, recovery fires', () => {
+    // This is the actual version-skew path this PR exists to fix. On the
+    // introducing tick the working-tree copy of the invariant lib is still
+    // the PRE-R4.b checkout — i.e. ABSENT here (we deliberately do NOT call
+    // stageInvariantLib). source_invariant_lib must therefore fall through
+    // to the `git show origin/$BRANCH:scripts/lib/deploy-tick-invariant.sh`
+    // branch and source the REAL helper straight out of the object store.
+    //
+    // We prove the fetch-and-source worked by driving a failed-deploy tick
+    // that leaves the daemon dead from an `active` pre-state, and asserting
+    // the recovery (`deploy_tick_invariant: restored`) actually fired — which
+    // is only possible if the real `deploy_tick_invariant__post` was sourced
+    // (the no-op-stub fallback returns 0 without restoring).
+    //
+    // git stub discriminates by the `show` ref argument:
+    //   show origin/main:scripts/lib/deploy-tick-invariant.sh → cat the real lib
+    //   show origin/main:scripts/pull-deploy.sh               → empty (no self-install asset)
+    //   rev-parse HEAD → LOCAL; rev-parse origin/main → REMOTE (deploy needed)
+    const realLib = INVARIANT_LIB_SRC;
+    stubsDir = makeStubsDir({
+      git: `case "$1" in
+  rev-parse)
+    if [[ "$2" == "HEAD" ]]; then echo aaaaaaaaaaaaaaaa; else echo bbbbbbbbbbbbbbbb; fi
+    ;;
+  show)
+    case "$2" in
+      *deploy-tick-invariant.sh) cat ${JSON.stringify(realLib)} ;;
+      *) : ;;  # empty — no pull-deploy.sh self-install asset
+    esac
+    ;;
+  *) exit 0 ;;
+esac`,
+      // systemctl tracks ActiveState in a state file, starting `active`
+      // (so pre_state is `active` going into the deploy). is-active reads it;
+      // show echoes it; reset-failed/start flip it active again.
+      systemctl: `STATE_FILE="$(dirname "$0")/.daemon-state"
+[[ -f "$STATE_FILE" ]] || echo active > "$STATE_FILE"
+case "$1" in
+  is-active) [[ "$(cat "$STATE_FILE")" == active ]] && exit 0 || exit 3 ;;
+  show) cat "$STATE_FILE" ;;
+  reset-failed) exit 0 ;;
+  start) echo active > "$STATE_FILE"; exit 0 ;;
+  *) exit 0 ;;
+esac`,
+      sudo: 'exec "$@"',
+      logger: 'exit 0',
+      // deploy.sh "fails" AND leaves the daemon dead — the classic R4.b
+      // failure mode (stop early, fail before the matching start).
+      'deploy.sh': `echo "deploy ran (failed)"; echo failed > "$(dirname "$0")/.daemon-state"; exit 1`,
+    });
+    // Deliberately NO stageInvariantLib — the working-tree copy is absent,
+    // forcing the git-show fallback.
+    const result = run({ stubsDir, repoDir });
+    // The fallback source emitted its diagnostic (now on stderr, N2).
+    // BRANCH defaults to `main` in the script (the test doesn't override it),
+    // and the git stub matches `show origin/main:scripts/lib/...` by suffix.
+    expect(result.stderr).toContain(
+      'W6: sourced deploy-tick-invariant.sh from origin/main (working-tree copy absent/stale)',
+    );
+    // The REAL helper (fetched from origin via `git show`) ran the recovery:
+    // it logged the restoring→restored transition, which the no-op-stub
+    // fallback (`deploy_tick_invariant__post() { return 0; }`) could never do.
+    // The final `probe_daemon || true` at end-of-tick sees the daemon already
+    // back `active`, so no `calendar_adviser_daemon_down` line is expected on
+    // this deploy-path tick — the recovery beat the probe.
+    expect(result.stderr).toContain(
+      'deploy_tick_invariant: restoring unit=fake-daemon.service pre_state=active',
+    );
+    expect(result.stderr).toContain('deploy_tick_invariant: restored unit=fake-daemon.service');
+    // Deploy itself failed, so the tick still propagates Result=failure to
+    // systemd (exit non-zero) EVEN THOUGH the invariant recovered the daemon
+    // — same semantics as tick 1 of the "W6 sequence" test above. The point
+    // proven here is that the recovery ran at all, via the git-show fallback.
+    expect(result.status).not.toBe(0);
+  });
+
   it('reports SubState "unknown" when systemctl show errors', () => {
     // `show` errors (exit 1) so probe_daemon's SubState read falls back to
     // "unknown". This fixture stages no invariant lib and `git show` returns
