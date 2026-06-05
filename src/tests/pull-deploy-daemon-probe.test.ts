@@ -11,7 +11,16 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -520,5 +529,79 @@ esac`,
       'deploy.sh': 'echo failing; exit 42',
     });
     expect(r.result.status).toBe(42);
+  });
+});
+
+describe('pull-deploy.sh — timer enable-state self-heal', () => {
+  // Regression cover for the 2026-06-05 finding: the Z19 migration restarted
+  // the long-running daemons but left ai-calendar-adviser-sync.timer
+  // started-but-disabled (active, but no timers.target.wants symlink), so it
+  // would silently never come back after the next reboot. ensure_timers_enabled
+  // re-asserts enable-state every tick on the repo's shipped .timer set.
+  // (Incident 2026-06-02-golden-ai-ops-timers-dead-after-z19-migration.md.)
+  let stubsDir: string;
+  let repoDir: string;
+
+  beforeEach(() => {
+    repoDir = makeRepoDir();
+    // Stage a shipped timer unit so the enable loop has something to iterate.
+    const unitDir = join(repoDir, 'deploy', 'systemd');
+    mkdirSync(unitDir, { recursive: true });
+    writeFileSync(
+      join(unitDir, 'ai-calendar-adviser-sync.timer'),
+      '[Unit]\nDescription=sync\n[Timer]\nOnCalendar=*:0/15\n[Install]\nWantedBy=timers.target\n',
+      'utf8',
+    );
+  });
+
+  afterEach(() => {
+    if (stubsDir) rmSync(stubsDir, { recursive: true, force: true });
+    if (repoDir) rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  // Daemon up (is-active → 0) so the no-deploy fast path exits clean. is-enabled
+  // reflects `enabledState`; `enable` appends the unit name to .enabled-units so
+  // the test can assert whether it was invoked. HEAD == origin (rev-parse echoes
+  // a constant) → LOCAL == REMOTE → no deploy.
+  function systemctlStub(enabledState: string): string {
+    return `STUB_DIR="$(dirname "$0")"
+case "$1" in
+  is-active) exit 0 ;;
+  is-enabled) echo "${enabledState}"; [[ "${enabledState}" == enabled ]] && exit 0 || exit 1 ;;
+  enable) echo "$2" >> "$STUB_DIR/.enabled-units"; exit 0 ;;
+  show) echo active ;;
+  *) exit 0 ;;
+esac`;
+  }
+
+  it('enables a shipped timer that is started-but-disabled', () => {
+    stubsDir = makeStubsDir({
+      git: 'if [[ "$1" == "rev-parse" ]]; then echo deadbeefdeadbeef; else exit 0; fi',
+      systemctl: systemctlStub('disabled'),
+      // Real `sudo -n` consumes its own flag then runs the command; the
+      // passthrough stub must strip a leading -n or it would try to exec `-n`.
+      sudo: '[[ "$1" == "-n" ]] && shift; exec "$@"',
+      logger: 'exit 0',
+    });
+    const result = run({ stubsDir, repoDir });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(
+      'ensure_timers_enabled: ai-calendar-adviser-sync.timer is disabled — enabling',
+    );
+    const enabled = readFileSync(join(stubsDir, '.enabled-units'), 'utf8');
+    expect(enabled).toContain('ai-calendar-adviser-sync.timer');
+  });
+
+  it('is a no-op when the timer is already enabled (idempotent)', () => {
+    stubsDir = makeStubsDir({
+      git: 'if [[ "$1" == "rev-parse" ]]; then echo deadbeefdeadbeef; else exit 0; fi',
+      systemctl: systemctlStub('enabled'),
+      sudo: 'exec "$@"',
+      logger: 'exit 0',
+    });
+    const result = run({ stubsDir, repoDir });
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('ensure_timers_enabled');
+    expect(existsSync(join(stubsDir, '.enabled-units'))).toBe(false);
   });
 });
