@@ -138,6 +138,39 @@ probe_daemon() {
   return 1
 }
 
+# Re-assert systemd ENABLE-state for every shipped .timer unit on each tick.
+# The host-side bootstrap deploy.sh enables units at install time, but a
+# re-bootstrap can leave a unit started-but-disabled — it then runs until the
+# next reboot and silently never comes back (no timers.target.wants symlink).
+# ai-calendar-adviser-sync.timer was found exactly this way on 2026-06-05
+# (active, but `is-enabled` = disabled) — the residual of incident
+# 2026-06-02-golden-ai-ops-timers-dead-after-z19-migration.md, where the Z19
+# migration restarted the long-running daemons but not the timers. Every other
+# fleet timer was re-enabled; this one was missed.
+#
+# Runs on BOTH the no-deploy fast path and the post-deploy path (called before
+# the LOCAL==REMOTE branch split) so enable-state self-heals within one tick of
+# the puller running — no code deploy required, which is the case after a
+# migration. Idempotent: acts ONLY when `is-enabled` reports `disabled` (the
+# exact active-but-won't-survive-reboot failure mode); leaves static/masked/
+# not-found units untouched. `sudo -n` matches the NOPASSWD pattern already
+# used for the chown below; `|| true` so a transient enable failure can never
+# break a deploy tick. The repo's deploy/systemd/*.timer set is the
+# authoritative list; is-enabled/enable operate on the INSTALLED unit by name.
+ensure_timers_enabled() {
+  shopt -s nullglob
+  local timer_path timer_name state
+  for timer_path in "$REPO_DIR"/deploy/systemd/*.timer; do
+    timer_name=$(basename "$timer_path")
+    state=$("$SYSTEMCTL_BIN" is-enabled "$timer_name" 2>/dev/null || true)
+    if [[ "$state" == "disabled" ]]; then
+      echo "ensure_timers_enabled: $timer_name is disabled — enabling (would not survive reboot)" >&2
+      sudo -n "$SYSTEMCTL_BIN" enable "$timer_name" >/dev/null 2>&1 || true
+    fi
+  done
+  shopt -u nullglob
+}
+
 cd "$REPO_DIR"
 
 git fetch --quiet origin "$BRANCH"
@@ -149,6 +182,12 @@ source_invariant_lib
 
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse "origin/$BRANCH")
+
+# Self-heal timer enable-state every tick, on both the no-deploy and the
+# deploy paths (see ensure_timers_enabled comment). Cheap no-op in steady
+# state; the only durable action is re-enabling a unit a re-bootstrap left
+# started-but-disabled.
+ensure_timers_enabled
 
 if [[ "$LOCAL" == "$REMOTE" ]]; then
   # No deploy needed — still probe daemon liveness so the no-op path
