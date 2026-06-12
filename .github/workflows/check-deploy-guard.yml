@@ -41,11 +41,13 @@ on:
   pull_request:
     paths:
       - 'scripts/pull-deploy.sh'
+      - 'scripts/lib/deploy-tick-invariant.sh'
       - '.github/workflows/check-deploy-guard.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/pull-deploy.sh'
+      - 'scripts/lib/deploy-tick-invariant.sh'
       - '.github/workflows/check-deploy-guard.yml'
 
 jobs:
@@ -107,3 +109,51 @@ jobs:
             exit 1
           fi
           echo "B8.10.3 guard verified: scripts/pull-deploy.sh runs the post-daemon-reload drift check."
+
+      - name: Verify the deploy-tick invariant helper + its wiring (W9)
+        # W9 — scripts/lib/deploy-tick-invariant.sh now carries the production
+        # "daemon-must-be-active after every deploy tick" recovery invariant
+        # (R4.b). It is sourced from scripts/pull-deploy.sh via
+        # source_invariant_lib and called at the deploy site. Before W9 this
+        # workflow neither triggered on edits to the helper (it wasn't in the
+        # paths: filter) nor validated the sourcing wiring — so a PR that
+        # weakened or deleted the helper alone could merge without the guard
+        # ever running, re-opening the 2026-05-27 silent-dead-daemon outage
+        # class (W6/R4.b). Guard BOTH the puller's wiring of the helper AND
+        # the helper's own recovery signatures.
+        run: |
+          LIB=scripts/lib/deploy-tick-invariant.sh
+          test -f "$LIB" || {
+            echo "::error::$LIB missing — W9 requires the deploy-tick invariant helper that carries the post-deploy daemon-recovery invariant (R4.b)"
+            echo "  see: https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md#w9"
+            exit 1
+          }
+          # The puller must source the helper and call both surface functions.
+          for sig in 'source_invariant_lib' 'deploy_tick_invariant__pre_state' 'deploy_tick_invariant__post'; do
+            if ! grep -qF "$sig" scripts/pull-deploy.sh; then
+              echo "::error file=scripts/pull-deploy.sh::W9 guard removed — pull-deploy.sh no longer wires '$sig' from the deploy-tick invariant helper"
+              echo "  rationale: the helper carries the post-deploy daemon-recovery invariant (R4.b); without the wiring the recovery never fires and a deploy that leaves the daemon dead stays dead until the next code-change tick."
+              echo "  see: https://github.com/hamlet-archer/ai-ops-meta/blob/main/architect-backlog.md#w9"
+              exit 1
+            fi
+          done
+          # The helper must keep its one-shot recovery + post-start verification.
+          if ! grep -qE 'reset-failed' "$LIB"; then
+            echo "::error file=$LIB::W9 guard removed — helper no longer runs 'systemctl reset-failed' before the recovery start"
+            echo "  rationale: a failed unit must be reset before start, or the recovery start is a no-op."
+            exit 1
+          fi
+          if ! grep -qF 'start returned 0 but ActiveState=' "$LIB"; then
+            echo "::error file=$LIB::W9 guard removed — helper no longer verifies the unit actually came up after start"
+            echo "  rationale: systemctl start returns 0 the moment ExecStartPre queues; without the post-start ActiveState check a unit that crashes in ExecStart slips through as 'recovered'."
+            exit 1
+          fi
+          echo "W9 guard verified: deploy-tick-invariant.sh present + wired into pull-deploy.sh + retains reset-failed + post-start ActiveState verification."
+
+      - name: Smoke-test the deploy-tick invariant helper (W9)
+        # "Better still, run a smoke script instead of pure grep" (codex W9).
+        # The helper ships a hermetic SMOKE harness (stub systemctl + sudo
+        # passthrough) covering its three behavioural cases: deploy-ok no-op,
+        # inactive-pre-state no-op, and active->dead recovery. Running it here
+        # turns a structural grep into an executable guard.
+        run: SMOKE=1 bash scripts/lib/deploy-tick-invariant.sh
