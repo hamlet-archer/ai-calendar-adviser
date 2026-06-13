@@ -19,17 +19,25 @@ WorkingDirectory=/opt/ai-calendar-adviser
 EnvironmentFile=/opt/ai-calendar-adviser/.env
 ExecStart=/usr/bin/node dist/main.js
 Restart=on-failure
-RestartSec=5
+# Slow restart so a Google quota rate-limit doesn't re-burn the per-minute
+# window on a crash-loop (folded from the timeout-override.conf drop-in).
+RestartSec=120
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=30
+# Cold boot self-check + initial sync over the calendars + quota-retry
+# headroom. A bare 30s was insufficient: the boot check is ~5s but Google
+# API quota retries can stretch it to 60-90s under sustained rate-limit, so
+# 300s gives the googleapis exponential-backoff path room (folded from the
+# timeout-override.conf drop-in so the running unit == this file; B8.10.3).
+TimeoutStartSec=300
 TimeoutStopSec=10
 
 # Block until the RPC socket is actually bound — the unit isn't "active"
 # until callers can connect. Caps the boot race ai-comms-adviser-query
 # left implicit; if main.ts fatals during runBootCheck, this fires before
-# Restart kicks in and gives systemd a clean failed-state.
-ExecStartPost=/bin/bash -c 'for i in $(seq 1 30); do [ -S /run/ai-calendar-adviser/query.sock ] && exit 0; sleep 1; done; exit 1'
+# Restart kicks in and gives systemd a clean failed-state. 300 iterations
+# matches TimeoutStartSec=300 (one probe/second).
+ExecStartPost=/bin/bash -c 'for i in $(seq 1 300); do [ -S /run/ai-calendar-adviser/query.sock ] && exit 0; sleep 1; done; exit 1'
 
 # RuntimeDirectory creates /run/ai-calendar-adviser/ owned by ubuntu:ubuntu
 # at service start; systemd cleans it up on stop. main.ts binds its
@@ -53,7 +61,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/ai-calendar-adviser
+# /var/lib/ai-ops holds the shared control-plane ops.db. ProtectSystem=strict
+# makes everything outside ReadWritePaths read-only, which is why the boot-time
+# ops.db open returned "attempt to write a readonly database" (AI1) — add it.
+ReadWritePaths=/var/lib/ai-calendar-adviser /var/lib/ai-ops
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
