@@ -22,6 +22,7 @@ import { dirname } from 'node:path';
 import { BootCheckError, renderDiagnostic, runBootCheck } from './boot-check.js';
 import { CalendarCache } from './cache.js';
 import { buildContractValidator } from './contracts.js';
+import { closeOpsDb, openOpsDb, runSyncWithTrace } from './ops-db.js';
 import { type RunningRpcServer, startRpcServer } from './rpc-server.js';
 import { renderSyncReport, runSyncCycle } from './sync-runner.js';
 
@@ -66,9 +67,29 @@ async function main(): Promise<number> {
       // Best-effort. systemd RuntimeDirectory typically creates /run/...
     }
   }
+  // Register the agents row + open the shared ops.db handle once at boot, so
+  // calendar-adviser is visible to the dashboard fleet-liveness probe even
+  // before the first 15-min sync timer fires (AI1). Bootstrap is an UPSERT,
+  // so a registry change self-heals here. Best-effort: a boot-time ops.db
+  // outage must not block the RPC daemon.
+  try {
+    await openOpsDb();
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: 'warn',
+        service: 'ai-calendar-adviser',
+        phase: 'ops-db',
+        msg: 'ops_db_open_failed_at_boot',
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+
   const cache = new CalendarCache(dbPath);
   try {
-    const report = await runSyncCycle({ adapter, cache, calendarIds });
+    // Trace the daemon's initial sync as a `runs` row too (fail-soft on trace).
+    const report = await runSyncWithTrace(() => runSyncCycle({ adapter, cache, calendarIds }));
     console.log(renderSyncReport(report));
   } catch (err) {
     console.error(
@@ -121,6 +142,9 @@ async function main(): Promise<number> {
       await running.close();
     } finally {
       cache.close();
+      await closeOpsDb().catch(() => {
+        /* best-effort flush on shutdown */
+      });
     }
     process.exit(0);
   };
