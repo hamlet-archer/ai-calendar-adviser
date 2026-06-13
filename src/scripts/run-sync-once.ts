@@ -14,6 +14,7 @@
 
 import { BootCheckError, renderDiagnostic, runBootCheck } from '../boot-check.js';
 import { CalendarCache } from '../cache.js';
+import { closeOpsDb, runSyncWithTrace } from '../ops-db.js';
 import { renderSyncReport, runSyncCycle } from '../sync-runner.js';
 
 const DEFAULT_DB_PATH = process.env.CALENDAR_DB_PATH ?? '/var/lib/ai-calendar-adviser/calendar.db';
@@ -44,13 +45,18 @@ async function main(): Promise<number> {
 
   const cache = new CalendarCache(DEFAULT_DB_PATH);
   try {
-    const report = await runSyncCycle({ adapter, cache, calendarIds });
+    // Wrap the cycle in a control-plane run so each timer fire writes an ops.db
+    // `runs` row — the dashboard's fleet-liveness probe (AI1). runSyncWithTrace
+    // returns the report unchanged and is fail-soft on the trace, so exit-code
+    // semantics below are preserved even if ops.db is unreachable.
+    const report = await runSyncWithTrace(() => runSyncCycle({ adapter, cache, calendarIds }));
 
     console.log(renderSyncReport(report));
     const failed = report.results.some((r) => r.status === 'error');
     return failed ? 2 : 0;
   } finally {
     cache.close();
+    await closeOpsDb();
   }
 }
 
