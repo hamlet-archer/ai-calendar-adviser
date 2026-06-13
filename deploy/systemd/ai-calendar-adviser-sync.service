@@ -22,7 +22,10 @@ LoadCredential=oauth-token:/etc/ai-calendar-adviser/oauth-token.json
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/ai-calendar-adviser
+# /var/lib/ai-ops holds the shared control-plane ops.db the sync oneshot now
+# writes a run trace to (AI1). Without it, ProtectSystem=strict makes ops.db
+# read-only and the trace silently degrades to untraced.
+ReadWritePaths=/var/lib/ai-calendar-adviser /var/lib/ai-ops
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
