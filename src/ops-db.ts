@@ -102,6 +102,40 @@ export async function runSyncWithTrace(
     run.bumpItems(upserted);
     const failures = report.results.filter((r) => r.status === 'error');
     const okCount = report.results.length - failures.length;
+    // AJ2a: per-cycle success-path trace event so the dashboard /feed shows the
+    // sync OUTCOME (calendars synced, failures, events upserted), not just that
+    // the sync ran (the `runs` row from AI1). Sibling of
+    // email-triage.cycle_complete.v1; contract sync.cycle_complete.v1 in
+    // ai-ops-meta. Fires on every non-throwing cycle — including partial-success
+    // (failures.length > 0 but the sync did not throw); the `sync.failed`
+    // catch-path emit below covers the thrown-error case. Fail-soft: a failed
+    // emit never fails the sync (the sync oneshot IS the liveness signal, so
+    // observability wiring must degrade, not fail — same invariant as the
+    // open-failure catch above).
+    try {
+      await cp.emit({
+        run,
+        kind: 'sync.cycle_complete',
+        severity: 'info',
+        payload: {
+          contract_id: 'sync.cycle_complete.v1',
+          sources_ok: okCount,
+          sources_failed: failures.length,
+          rows_upserted: upserted,
+          detail: `calendars_ok=${okCount} events_upserted=${upserted}`,
+        },
+      });
+    } catch (emitErr) {
+      console.error(
+        JSON.stringify({
+          level: 'warn',
+          service: 'ai-calendar-adviser',
+          phase: 'ops-db',
+          msg: 'sync_cycle_complete_emit_failed',
+          error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+        }),
+      );
+    }
     if (failures.length > 0) {
       run.bumpErrors(failures.length);
       await run.end({
